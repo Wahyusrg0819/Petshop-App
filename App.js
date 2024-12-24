@@ -1,20 +1,32 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
+import AuthNavigator from './src/navigation/AuthNavigator';
+import AppNavigator from './src/navigation/AppNavigator';
+import LoadingScreen from './src/components/LoadingScreen';
+
+
+const Stack = createStackNavigator();
+
+const AppContent = () => {
+  const { isLoggedIn, isLoading } = useAuth();
+  const [cart, setCart] = useState([]);
+
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
+
+  // Tampilkan navigasi berdasarkan status login
+  return isLoggedIn ? <AppNavigator cart={cart} setCart={setCart} /> : <AuthNavigator />;
+};
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.js to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <NavigationContainer>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
