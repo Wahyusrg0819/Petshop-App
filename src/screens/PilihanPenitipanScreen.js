@@ -8,92 +8,100 @@ import {
   Image,
   ScrollView,
   SafeAreaView,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  StatusBar,
 } from "react-native";
 import { FontAwesome5 } from "@expo/vector-icons";
 import ModalScreen from './ModalScreen';
-import * as Location from 'expo-location';
+import { useNavigation } from '@react-navigation/native';
+import { useAuth } from "../context/AuthContext";
 
-
-const PilihanPenitipanScreen = ({ navigation }) => {
+const PilihanPenitipanScreen = () => {
+  const navigation = useNavigation();
+  const { userData } = useAuth();
+  const user_id = userData?.user_id;
+  const address = userData?.address;
   const [categories, setCategories] = useState([]);
   const [isLocationModalVisible, setIsLocationModalVisible] = useState(false);
   const [location, setLocation] = useState(null);
-   const [errorMsg, setErrorMsg] = useState(null);
-  const [locationName, setLocationName] = useState('Fetching location...');
+  const [errorMsg, setErrorMsg] = useState(null);
+  const [locationName, setLocationName] = useState(address || 'Fetching location...');
+  const [loading, setLoading] = useState(true);
+
+  // Objek pemetaan gambar berdasarkan category_name
+  const categoryImages = {
+    "Kucing": require("../assets/images/cat.png"),
+    "Anjing": require("../assets/images/dog.png"),
+    // Tambahkan pemetaan lainnya sesuai kebutuhan
+  };
 
   useEffect(() => {
-    // Simulasi data kategori penitipan
-    const fetchedCategories = [
-      {
-        id: "1",
-        name: "Kucing",
-        image: "https://via.placeholder.com/150/92c952", // Gambar dari JSONPlaceholder
-      },
-      {
-        id: "2",
-        name: "Anjing",
-        image: "https://via.placeholder.com/150/771796", // Gambar dari JSONPlaceholder
-      },
-      {
-        id: "4",
-        name: "More Pets Coming Soon",
-        image: "https://via.placeholder.com/150/d32776", // Gambar dari JSONPlaceholder
-      },
-    ];
-    setCategories(fetchedCategories);
-  }, []);
-
-  useEffect(() => {
-    fetchUserLocation();
-  }, []);  // Memanggil fetchUserLocation hanya saat komponen pertama kali dimuat
-  
-  const fetchUserLocation = async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setErrorMsg('Permission to access location was denied');
-        setLocationName('Permission denied');
-        return;
-      }
-  
-      let currentLocation = await Location.getCurrentPositionAsync({});
-      setLocation(currentLocation);
-  
+    const fetchCategories = async () => {
       try {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${currentLocation.coords.latitude}&lon=${currentLocation.coords.longitude}`
-        );
-        const data = await response.json();
-        if (data && data.address) {
-          setLocationName( data.address.village || data.address.town || data.address.city ||  'Unknown location');
-        } else {
-          setLocationName('Unknown location');
+        const response = await fetch("http://172.20.10.3:5000/api/pet-categories");
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
+        const data = await response.json();
+
+        // Map data dari backend ke format yang dibutuhkan
+        const mappedCategories = data.map(category => ({
+          id: category.category_id.toString(), // Pastikan id sebagai string
+          name: category.category_name,
+          image: categoryImages[category.category_name] || require("../assets/images/comingsoon.jpg"),
+        }));
+
+        setCategories(mappedCategories);
       } catch (error) {
-        setLocationName('Error fetching location name');
+        console.error("Error fetching categories:", error);
+        Alert.alert("Error", "Gagal mengambil data kategori hewan.");
+      } finally {
+        setLoading(false);
       }
     };
-  
+
+    fetchCategories();
+  }, []);
+
+  const handleCategoryPress = (category) => {
+    navigation.navigate('Schedule', { 
+      category: category 
+    });
+  };
 
   const renderCategory = ({ item }) => (
     <TouchableOpacity
       style={styles.categoryCard}
-      onPress={() => navigation.navigate("ScheduleScreen", { category: item })}
+      onPress={() => handleCategoryPress(item)}
     >
-      <Image source={{ uri: item.image }} style={styles.categoryImage} />
+      <Image source={item.image} style={styles.categoryImage} />
       <Text style={styles.categoryName}>{item.name}</Text>
     </TouchableOpacity>
   );
-  
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#8bc34a" />
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#ffffff" }}>
+    <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => setIsLocationModalVisible(true)}>
-                        <Text style={styles.locationLabel}>Location</Text>
-                        <Text style={styles.locationValue}>{locationName}</Text>
-          </TouchableOpacity>
+          <View>
+            <Text style={styles.locationLabel}>Location</Text>
+            <Text style={styles.locationValue}>
+              {locationName.length > 25
+                ? `${locationName.slice(0, 25)}...`
+                : locationName}
+            </Text>
+          </View>
         </View>
 
         {/* Title */}
@@ -114,42 +122,48 @@ const PilihanPenitipanScreen = ({ navigation }) => {
             keyExtractor={(item) => item.id}
             numColumns={2} // Menampilkan dalam 2 kolom
             columnWrapperStyle={styles.row} // Styling baris kategori
+            contentContainerStyle={{ paddingBottom: 20 }}
           />
         </View>
       </View>
       <ModalScreen
         isVisible={isLocationModalVisible}
         onClose={() => setIsLocationModalVisible(false)}
-        fetchUserLocation={fetchUserLocation}
         location={location}
         errorMsg={errorMsg}
         setLocationName={setLocationName}
       />
-
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
   container: {
     flex: 1,
     backgroundColor: "#ffffff",
-    paddingHorizontal: 20,
+    paddingHorizontal: Platform.OS === 'android' ? 10 : 12,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 20,
-    marginBottom: 20,
+    marginTop: Platform.OS === 'android' ? 0 : 10,
+    marginBottom: Platform.OS === 'android' ? 10 : 20,
+    paddingVertical: Platform.OS === 'android' ? 12 : 0,
   },
   locationLabel: {
-    fontSize: 12,
+    fontSize: Platform.OS === 'android' ? 12 : 12,
     color: "#7a7a7a",
   },
   locationValue: {
-    fontSize: 16,
+    fontSize: Platform.OS === 'android' ? 14 : 16,
     fontWeight: "bold",
+    marginBottom: Platform.OS === 'android' ? 8 : 0,
   },
   headerIcons: {
     flexDirection: "row",
@@ -175,6 +189,7 @@ const styles = StyleSheet.create({
   },
   categorySection: {
     marginBottom: 20,
+    flex: 1,
   },
   sectionHeader: {
     flexDirection: "row",
@@ -207,7 +222,7 @@ const styles = StyleSheet.create({
   },
   categoryImage: {
     width: 100,
-    height: 100,
+    height: 140,
     resizeMode: "contain",
     marginBottom: 10,
   },
@@ -215,6 +230,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
     textAlign: "center",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
   },
 });
 

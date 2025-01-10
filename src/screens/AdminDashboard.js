@@ -9,10 +9,11 @@ import {
   Alert,
   RefreshControl,
   Image,
-  ActivityIndicator
+  ActivityIndicator,
+  TextInput
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { FontAwesome5 } from '@expo/vector-icons';
+import { FontAwesome5, Ionicons, AntDesign } from '@expo/vector-icons';
 
 const AdminDashboard = ({ navigation }) => {
   const { logout } = useAuth();
@@ -23,10 +24,13 @@ const AdminDashboard = ({ navigation }) => {
   ]);
   const [selectedCategory, setSelectedCategory] = useState('Pakan');
   const [products, setProducts] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
-  const API_BASE_URL = 'http://172.20.10.2:5000';
+  const API_BASE_URL = 'http://172.20.10.3:5000';
 
   const fetchProducts = async () => {
     try {
@@ -68,10 +72,7 @@ const AdminDashboard = ({ navigation }) => {
     try {
       const success = await logout();
       if (success) {
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'LoginScreen' }],
-        });
+        return;
       }
     } catch (error) {
       console.error('Logout error:', error);
@@ -79,9 +80,58 @@ const AdminDashboard = ({ navigation }) => {
     }
   };
 
+  // Fungsi pencarian produk
+  const handleSearch = (query) => {
+    setSearchQuery(query);
+    const filtered = products.filter(product => 
+      product.name.toLowerCase().includes(query.toLowerCase()) ||
+      product.description.toLowerCase().includes(query.toLowerCase())
+    );
+    setFilteredProducts(filtered);
+  };
+
+  useEffect(() => {
+    setFilteredProducts(products);
+  }, [products]);
+
   useEffect(() => {
     fetchProducts();
   }, []);
+
+  // Fungsi untuk mengecek notifikasi yang belum dibaca
+  const checkUnreadNotifications = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/notifications/admin`);
+      const data = await response.json();
+
+      if (response.ok) {
+        // Hitung jumlah notifikasi yang belum dibaca
+        const unreadCount = data.filter(notification => !notification.is_read).length;
+        setUnreadNotifications(unreadCount);
+      }
+    } catch (error) {
+      console.error('Error checking notifications:', error);
+    }
+  };
+
+  useEffect(() => {
+    // Cek notifikasi saat komponen dimount
+    checkUnreadNotifications();
+
+    // Set interval untuk mengecek notifikasi setiap 30 detik
+    const intervalId = setInterval(checkUnreadNotifications, 30000);
+
+    // Cek notifikasi setiap kali screen mendapat fokus
+    const unsubscribeFocus = navigation.addListener('focus', () => {
+      checkUnreadNotifications();
+    });
+
+    // Cleanup interval dan listener saat komponen unmount
+    return () => {
+      clearInterval(intervalId);
+      unsubscribeFocus();
+    };
+  }, [navigation]);
 
   const renderProductCard = (product) => {
     // Debug log untuk melihat path gambar
@@ -99,11 +149,7 @@ const AdminDashboard = ({ navigation }) => {
       >
         <View style={styles.imageContainer}>
           <Image 
-            source={
-              product.productPict 
-                ? { uri: `${product.productPict}` }
-                : require('../../assets/images/default-avatar-image.png')
-            }
+            source={product.productPict ? { uri: product.productPict } : require('../../assets/images/no-image.png')}
             style={styles.productImage}
             resizeMode="cover"
             onError={(error) => {
@@ -130,16 +176,46 @@ const AdminDashboard = ({ navigation }) => {
     );
   };
 
+  // Update bagian render notifikasi button
+  const renderNotificationButton = () => (
+    <TouchableOpacity
+      style={styles.iconButton}
+      onPress={() => navigation.navigate('AdminNotificationScreen')}
+    >
+      <View>
+        <Ionicons name="notifications-outline" size={24} color="#333" />
+        {unreadNotifications > 0 && (
+          <View style={styles.notificationBadge}>
+            {unreadNotifications > 99 ? (
+              <Text style={styles.badgeText}>99+</Text>
+            ) : (
+              <Text style={styles.badgeText}>{unreadNotifications}</Text>
+            )}
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerContainer}>
-        <Text style={styles.headerTitle}>Admin Dashboard</Text>
-        <TouchableOpacity 
-          style={styles.logoutButton} 
-          onPress={handleLogout}
-        >
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </TouchableOpacity>
+        <View style={styles.headerLeft} />
+        <View style={styles.headerRight}>
+          {renderNotificationButton()}
+          <TouchableOpacity 
+            style={styles.orderButton}
+            onPress={() => navigation.navigate('AdminOrderListScreen')}
+          >
+            <Ionicons name="list" size={24} color="#333" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.logoutButton} 
+            onPress={handleLogout}
+          >
+            <Text style={styles.logoutButtonText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -151,57 +227,86 @@ const AdminDashboard = ({ navigation }) => {
             tintColor="#C0EBA6"
           />
         }
+        style={styles.scrollView}
       >
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Categories</Text>
-          <View style={styles.categoryContainer}>
-            {categories.map((category) => (
-              <TouchableOpacity
-                key={category.id}
-                style={[
-                  styles.categoryButton,
-                  selectedCategory === category.name && styles.activeCategoryButton
-                ]}
-                onPress={() => setSelectedCategory(category.name)}
-              >
-                <Text
-                  style={[
-                    styles.categoryText,
-                    selectedCategory === category.name && styles.activeCategoryText
-                  ]}
-                >
-                  {category.name}
-                </Text>
-                <Text style={styles.categoryCount}>{category.count} items</Text>
+        <View style={styles.mainContent}>
+          <View style={styles.categorySection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Category</Text>
+              <TouchableOpacity>
+                <Text style={styles.viewAllText}>View All</Text>
               </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Products</Text>
-          </View>
-
-          {isLoading ? (
-            <ActivityIndicator size="large" color="#C0EBA6" style={styles.loader} />
-          ) : (
-            <View style={styles.productList}>
-              {products
-                .filter(product => {
-                  const categoryName = categories.find(c => c.id === product.category_id)?.name;
-                  return categoryName === selectedCategory;
-                })
-                .map(renderProductCard)}
-              {products.length === 0 && !isLoading && (
-                <View style={styles.emptyContainer}>
-                  <Text style={styles.emptyText}>No products available.</Text>
-                </View>
-              )}
             </View>
-          )}
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.categoryScroll}
+            >
+              {categories.map((category) => (
+                <TouchableOpacity
+                  key={category.id}
+                  style={[
+                    styles.categoryPill,
+                    selectedCategory === category.name && styles.activeCategoryPill
+                  ]}
+                  onPress={() => setSelectedCategory(category.name)}
+                >
+                  <Text
+                    style={[
+                      styles.categoryPillText,
+                      selectedCategory === category.name && styles.activeCategoryPillText
+                    ]}
+                  >
+                    {category.name.toLowerCase()}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          <View style={styles.stockSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Stock Produk</Text>
+              <TouchableOpacity>
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            </View>
+
+            {isLoading ? (
+              <View style={styles.loaderContainer}>
+                <ActivityIndicator size="large" color="#C0EBA6" />
+                <Text style={styles.loadingText}>Memuat produk...</Text>
+              </View>
+            ) : (
+              <View style={styles.productList}>
+                {filteredProducts
+                  .filter(product => {
+                    const categoryName = categories.find(c => c.id === product.category_id)?.name;
+                    return categoryName === selectedCategory;
+                  })
+                  .map(renderProductCard)}
+                {filteredProducts.length === 0 && !isLoading && (
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>Tidak ada produk tersedia.</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
         </View>
       </ScrollView>
+
+      {/* Floating Action Button untuk Penitipan */}
+      <TouchableOpacity 
+        style={styles.fabPenitipan}
+        onPress={() => navigation.navigate('AdminPetBoarding')}
+      >
+        <View style={styles.fabContent}>
+          <Ionicons name="paw" size={24} color="#FFFFFF" />
+          <Text style={styles.fabText}>Penitipan</Text>
+        </View>
+      </TouchableOpacity>
+
     </SafeAreaView>
   );
 };
@@ -216,15 +321,33 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    backgroundColor: '#ffffff',
-    elevation: 2,
+    paddingTop: 20,
   },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
+  headerLeft: {
+    width: 40,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  notificationButton: {
+    padding: 8,
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    right: -6,
+    top: -6,
+    backgroundColor: '#FF0000',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
   logoutButton: {
     backgroundColor: '#FF6B6B',
@@ -237,8 +360,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
-  section: {
+  scrollView: {
+    flex: 1,
+  },
+  mainContent: {
+    flex: 1,
     padding: 16,
+  },
+  categorySection: {
+    marginBottom: 24,
+  },
+  stockSection: {
+    flex: 1,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -247,62 +380,67 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
+    color: '#000',
   },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#B8EB92',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    gap: 6,
-  },
-  addButtonText: {
-    color: '#FFFFFF',
+  viewAllText: {
     fontSize: 14,
-    fontWeight: 'bold',
-  },
-  categoryContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  categoryButton: {
-    flex: 1,
-    minWidth: '30%',
-    backgroundColor: '#f1f1f1',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  activeCategoryButton: {
-    backgroundColor: '#9FEF9D',
-  },
-  categoryText: {
-    fontSize: 16,
+    color: '#C0EBA6',
     fontWeight: '500',
-    color: '#666',
   },
-  activeCategoryText: {
-    color: '#fff',
-  },
-  categoryCount: {
-    fontSize: 12,
-    color: '#888',
-    marginTop: 4,
-  },
-  productList: {
+  categoryScroll: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 10,
+  },
+  categoryPill: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    marginRight: 10,
+  },
+  activeCategoryPill: {
+    backgroundColor: '#C0EBA6',
+  },
+  categoryPillText: {
+    fontSize: 16,
+    color: '#666',
+    textTransform: 'lowercase',
+  },
+  activeCategoryPillText: {
+    color: '#FFF',
+  },
+  bottomBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 16,
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: -2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  bottomBarButton: {
+    padding: 8,
+  },
+  addProductButton: {
+    backgroundColor: '#C0EBA6',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
   },
   productCard: {
-    flexBasis: '48%',
+    width: '48%',
     backgroundColor: '#ffffff',
     borderRadius: 12,
     marginBottom: 10,
@@ -353,19 +491,96 @@ const styles = StyleSheet.create({
   outOfStock: {
     color: '#dc3545',
   },
-  loader: {
-    marginTop: 20,
-  },
-  emptyContainer: {
-    flex: 1,
+  loaderContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 50,
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 10,
+    color: '#666',
+    fontSize: 14,
+  },
+  emptyContainer: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
   },
   emptyText: {
     fontSize: 16,
-    color: '#888888',
-  }
+    color: '#666',
+    textAlign: 'center',
+  },
+  productList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 5,
+  },
+  orderButton: {
+    padding: 8,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+    borderRadius: 12,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  menuIcon: {
+    marginRight: 12,
+  },
+  menuText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  fabPenitipan: {
+    position: 'absolute',
+    right: 20,
+    bottom: 120,
+    backgroundColor: '#C0EBA6',
+    borderRadius: 30,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  fabContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
 });
 
 export default AdminDashboard;

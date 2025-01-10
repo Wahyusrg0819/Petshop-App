@@ -9,27 +9,41 @@ import {
   SafeAreaView,
   TextInput,
   ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../context/AuthContext';
+import FloatingNotification from '../components/FloatingNotification';
+import { useNavigation } from '@react-navigation/native';
 
-const ProductScreen = ({ navigation }) => {
+const ProductScreen = () => {
+  const navigation = useNavigation(); // Use navigation hook
+  const { userData } = useAuth(); // Access user data from AuthContext
+  const user_id = userData?.user_id; // Extract user ID from user data
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // State untuk menampilkan notifikasi
+  const [showNotification, setShowNotification] = useState(false);
+
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const response = await fetch('http://172.20.10.2:5000/api/all');
+        const response = await fetch('http://172.20.10.3:5000/api/all');
         const data = await response.json();
         const fetchedProducts = data.products.map(product => ({
           id: product.product_id.toString(),
           name: product.name,
           description: product.description || 'No description available',
-          price: 'Rp ' + parseFloat(product.price).toLocaleString('id-ID'),
-          image: product.productPict || '../../assets/images/default-avatar-image.png',
-          category: product.category_id || 'Unknown',
+          price: parseFloat(product.price),
+          image: product.productPict ? product.productPict : null,
+          category: product.category_id || 'Unknown', 
           stock: product.stock,
         }));
         setProducts(fetchedProducts);
@@ -52,31 +66,83 @@ const ProductScreen = ({ navigation }) => {
     setFilteredProducts(filtered);
   };
 
-  const handleAddToCart = (item) => {
-    console.log('Added to cart:', item);
+  const addToCart = async (product) => {
+    if (!user_id) {
+      Alert.alert('Error', 'User ID not found. Please login again.');
+      return;
+    }
+
+    try {
+      const payload = {
+        user_id,
+        product_id: product.id,
+        productPict: product.image,
+        quantity: 1,
+        price: product.price,
+      };
+
+      const response = await fetch('http://172.20.10.3:5000/api/addcart', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setShowNotification(true);
+      } else {
+        Alert.alert('Error', data.message || 'Failed to add product to cart');
+      }
+    } catch (error) {
+      console.error('Error adding product to cart:', error);
+      Alert.alert('Error', 'Something went wrong. Please try again.');
+    }
   };
 
-  const renderProduct = ({ item }) => (
-    <TouchableOpacity
-      style={styles.productCard}
-      onPress={() => navigation.navigate('ProductDetail', { product: item })}
-    >
-      <Image source={{ uri: item.image }} style={styles.productImage} />
-      <Text style={styles.productName}>{item.name}</Text>
-      <View style={styles.productFooter}>
-        <Text style={styles.productPrice}>{item.price}</Text>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            handleAddToCart(item);
-          }}
-        >
-          <Ionicons name="add" size={20} color="#ffffff" fontWeight="bold" />
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
+  const navigateToDetail = (item) => {
+    navigation.navigate('ProductDetailScreen', { product: item });
+  };
+
+  const renderProduct = ({ item }) => {
+    const formattedPrice = item.price.toLocaleString('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+
+    return (
+      <TouchableOpacity
+        style={styles.productCard}
+        onPress={() => navigateToDetail(item)}
+      >
+        <Image 
+          source={item.image ? { uri: item.image } : require('../../assets/images/no-image.png')} 
+          style={styles.productImage}
+        />
+        <Text style={styles.productName}>{item.name}</Text>
+        <View style={styles.productFooter}>
+          <Text style={styles.productPrice}>{formattedPrice}</Text>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={(e) => {
+              e.stopPropagation(); // Prevent navigation
+              addToCart(item);
+            }}
+          >
+            <Ionicons name="add" size={20} color="#ffffff" fontWeight="bold" />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const handleHideNotification = () => {
+    setShowNotification(false);
+  };
 
   if (loading) {
     return (
@@ -87,104 +153,130 @@ const ProductScreen = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }}>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search products..."
-            value={searchQuery}
-            onChangeText={handleSearch}
+    <>
+      <FloatingNotification
+        visible={showNotification}
+        message="Produk berhasil ditambahkan ke keranjang!"
+        onHide={handleHideNotification}
+      />
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search products..."
+              value={searchQuery}
+              onChangeText={handleSearch}
+            />
+            <TouchableOpacity style={styles.iconButton}>
+              <FontAwesome5 name="search" size={20} color="#7a7a7a" />
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={filteredProducts}
+            renderItem={renderProduct}
+            keyExtractor={(item) => item.id}
+            numColumns={2}
+            columnWrapperStyle={styles.row}
+            showsVerticalScrollIndicator={false}
           />
-          <TouchableOpacity style={styles.iconButton}>
-            <FontAwesome5 name="search" size={20} color="#7a7a7a" />
-          </TouchableOpacity>
         </View>
-        <FlatList
-          data={filteredProducts}
-          renderItem={renderProduct}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          columnWrapperStyle={styles.row}
-        />
-      </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
   container: {
     flex: 1,
     backgroundColor: '#ffffff',
-    padding: 20,
+    paddingHorizontal: Platform.OS === 'android' ? 10 : 12,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
-  },
-  backButton: {
-    marginRight: 10,
-    padding: 10,
+    marginBottom: Platform.OS === 'android' ? 10 : 10,
+    marginTop: Platform.OS === 'android' ? 0 : 0,
+    paddingVertical: Platform.OS === 'android' ? 12 : 0,
   },
   searchInput: {
     flex: 1,
-    height: 40,
+    height: Platform.OS === 'android' ? 45 : 40,
     backgroundColor: '#f2f2f2',
     borderRadius: 10,
-    paddingHorizontal: 10,
-    marginRight: 10,
+    paddingHorizontal: Platform.OS === 'android' ? 12 : 10,
+    marginRight: Platform.OS === 'android' ? 8 : 10,
+    fontSize: Platform.OS === 'android' ? 13 : 14,
   },
   iconButton: {
     backgroundColor: '#f2f2f2',
     borderRadius: 10,
-    width: 40,
-    height: 40,
+    width: Platform.OS === 'android' ? 45 : 40,
+    height: Platform.OS === 'android' ? 45 : 40,
     justifyContent: 'center',
     alignItems: 'center',
   },
   row: {
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: Platform.OS === 'android' ? 16 : 20,
   },
   productCard: {
     width: '48%',
+    height: Platform.OS === 'android' ? 200 : 220,
     backgroundColor: '#f9f9f9',
     borderRadius: 10,
-    padding: 15,
-    alignItems: 'center',
+    padding: Platform.OS === 'android' ? 12 : 15,
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
+    display: 'flex',
+    flexDirection: 'column',
   },
   productImage: {
-    width: 100,
-    height: 100,
+    width: Platform.OS === 'android' ? 90 : 100,
+    height: Platform.OS === 'android' ? 90 : 100,
     resizeMode: 'contain',
-    marginBottom: 10,
+    marginBottom: Platform.OS === 'android' ? 6 : 8,
+    alignSelf: 'center',
   },
   productName: {
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 8,
+    fontSize: Platform.OS === 'android' ? 13 : 14,
+    width: '100%',
+    minHeight: Platform.OS === 'android' ? 35 : 40,
+    maxHeight: Platform.OS === 'android' ? 35 : 40,
+    overflow: 'hidden',
+  },
+  productDescription: {
+    fontSize: Platform.OS === 'android' ? 11 : 12,
+    width: '100%',
+    height: Platform.OS === 'android' ? 25 : 30,
+    overflow: 'hidden',
+    color: '#666',
   },
   productFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
+    marginTop: Platform.OS === 'android' ? 6 : 8,
+    marginTop: 'auto', // Memastikan footer selalu di bawah
   },
   productPrice: {
-    fontSize: 16,
+    fontSize: Platform.OS === 'android' ? 14 : 16,
     fontWeight: 'bold',
     color: '#333',
   },
   addButton: {
     backgroundColor: '#C0EBA6',
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: Platform.OS === 'android' ? 28 : 30,
+    height: Platform.OS === 'android' ? 28 : 30,
+    borderRadius: Platform.OS === 'android' ? 14 : 15,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -192,6 +284,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#ffffff',
   },
 });
 

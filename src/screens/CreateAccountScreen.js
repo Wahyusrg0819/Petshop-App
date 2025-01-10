@@ -8,7 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import Checkbox from 'expo-checkbox';
-import axios from 'axios';  // Ensure axios is installed
+import axios from 'axios';
 
 const CreateAccountScreen = ({ navigation }) => {
   const [fullName, setFullName] = useState('');
@@ -16,95 +16,102 @@ const CreateAccountScreen = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [isChecked, setIsChecked] = useState(false);
 
-  // Handle Sign-Up and send data to the backend
-  // frontend/CreateAccountScreen.js
-const handleSignUp = async () => {
-  // Validasi input fields
-  if (!fullName.trim() || !email.trim() || !password.trim()) {
-    Alert.alert('Error', 'Please fill in all required fields');
-    return;
-  }
-  if (!isChecked) {
-    Alert.alert('Error', 'You must agree to the Terms of Service and Privacy Policy');
-    return;
-  }
-
-  try {
-    // Kirim data dengan field sesuai backend
-    const response = await axios.post('http://172.20.10.2:5000/api/register', {
-      name: fullName,  // Ubah fullName menjadi name
-      email,
-      password,
-    });
-
-    // Handle success response
-    if (response.status === 201) {
-      Alert.alert('Success', 'Account created successfully!');
-      navigation.navigate('LoginScreen'); // Navigasi setelah sukses
+  const handleSignUp = async () => {
+    // Validasi input fields
+    if (!fullName.trim() || !email.trim() || !password.trim()) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
     }
-  } catch (error) {
-    console.error('Error:', error.response?.data || error.message);
-    Alert.alert('Error', error.response?.data?.message || 'An error occurred while creating the account');
-  }
-};
+    if (!isChecked) {
+      Alert.alert('Error', 'You must agree to the Terms of Service and Privacy Policy');
+      return;
+    }
 
+    try {
+      // Kirim data dengan field sesuai backend
+      const response = await axios.post('http://172.20.10.3:5000/api/register', {
+        name: fullName,  // Ubah fullName menjadi name
+        email,
+        password,
+      });
+
+      // Handle success response
+      if (response.status === 201) {
+        Alert.alert('Success', 'Account created successfully!');
+        navigation.navigate('LoginScreen'); // Navigasi setelah sukses
+      }
+    } catch (error) {
+      console.error('Error:', error.response?.data || error.message);
+      Alert.alert('Error', error.response?.data?.message || 'An error occurred while creating the account');
+    }
+  };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Buat Akun Baru</Text>
-      <Text style={styles.description}>
-        Anjing: Latih dengan sabar dan konsisten, ajak berjalan-jalan minimal
-        30 menit sehari untuk menjaga kesehatan fisik dan mentalnya.
-      </Text>
+      <View style={styles.textContainer}>
+        <Text style={styles.title}>Halo,</Text>
+        <Text style={styles.title}>Selamat Bergabung!</Text>
+        <Text style={styles.description}>
+          Anjing: Latih dengan sabar dan konsisten, ajak berjalan-jalan minimal
+          30 menit sehari untuk menjaga kesehatan fisik dan mentalnya.
+        </Text>
+      </View>
 
-      {/* Full Name */}
       <TextInput
         style={styles.input}
         placeholder="Full Name"
+        placeholderTextColor="#7a7a7a"
         value={fullName}
         onChangeText={(text) => setFullName(text)}
       />
 
-      {/* Email */}
       <TextInput
         style={styles.input}
         placeholder="Email"
+        placeholderTextColor="#7a7a7a"
         value={email}
         onChangeText={(text) => setEmail(text)}
         keyboardType="email-address"
+        autoCapitalize="none"
       />
 
-      {/* Password */}
       <TextInput
         style={styles.input}
         placeholder="Password"
+        placeholderTextColor="#7a7a7a"
         value={password}
         onChangeText={(text) => setPassword(text)}
         secureTextEntry
       />
 
-      {/* Terms & Conditions Checkbox */}
       <View style={styles.checkboxContainer}>
         <Checkbox
           style={styles.checkbox}
           value={isChecked}
           onValueChange={setIsChecked}
+          color={isChecked ? '#8bc34a' : undefined}
         />
         <Text style={styles.checkboxLabel}>
           I agree to the{' '}
-          <Text style={styles.link} onPress={() => { /* navigate to terms screen */ }}>
-            Terms of Service
-          </Text>{' '}
+          <Text style={styles.link}>Terms of Service</Text>{' '}
           and{' '}
-          <Text style={styles.link} onPress={() => { /* navigate to privacy policy screen */ }}>
-            Privacy Policy
-          </Text>.
+          <Text style={styles.link}>Privacy Policy</Text>
         </Text>
       </View>
 
-      {/* Sign Up Button */}
-      <TouchableOpacity style={styles.button} onPress={handleSignUp}>
+      <TouchableOpacity
+        style={styles.button}
+        onPress={handleSignUp}
+      >
         <Text style={styles.buttonText}>Create Account</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity 
+        onPress={() => navigation.navigate('LoginScreen')}
+      >
+        <Text style={styles.signInText}>
+          Sudah punya akun? <Text style={styles.link}>Masuk</Text>
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -113,58 +120,77 @@ const handleSignUp = async () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#ffffff',
     justifyContent: 'center',
     paddingHorizontal: 20,
-    backgroundColor: '#f5f5f5',
+  },
+  textContainer: {
+    marginBottom: 30,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    textAlign: 'center',
+    textAlign: 'left',
     marginBottom: 10,
+    color: '#000000',
   },
   description: {
-    fontSize: 16,
-    textAlign: 'center',
+    fontSize: 14,
+    textAlign: 'left',
+    color: '#7a7a7a',
     marginBottom: 20,
-    color: '#555',
+    lineHeight: 20,
   },
   input: {
+    width: '100%',
     height: 50,
-    borderColor: '#ccc',
     borderWidth: 1,
+    borderColor: '#e0e0e0',
     borderRadius: 10,
-    paddingHorizontal: 10,
-    marginVertical: 10,
-    backgroundColor: '#fff',
+    paddingHorizontal: 15,
+    marginBottom: 15,
+    fontSize: 14,
+    color: '#000000',
   },
   checkboxContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginVertical: 10,
+    paddingRight: 10,
   },
   checkbox: {
     marginRight: 10,
+    borderRadius: 4,
   },
   checkboxLabel: {
     fontSize: 14,
-    color: '#555',
+    color: '#7a7a7a',
+    flex: 1,
   },
   link: {
-    color: '#1e90ff',
-    textDecorationLine: 'underline',
+    color: '#8bc34a',
+    fontWeight: 'bold',
   },
   button: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#C0EBA6',
     paddingVertical: 15,
-    borderRadius: 10,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+    width: '80%',
     alignItems: 'center',
     marginTop: 20,
+    alignSelf: 'center',
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 18,
+    color: '#ffffff',
+    fontSize: 16,
     fontWeight: 'bold',
+  },
+  signInText: {
+    fontSize: 14,
+    color: '#7a7a7a',
+    textAlign: 'center',
+    marginTop: 20,
   },
 });
 

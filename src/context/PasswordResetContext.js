@@ -12,7 +12,7 @@ export const PasswordResetProvider = ({ children }) => {
     try {
       setIsLoading(true);
       const response = await axios.post(
-        'http://172.20.10.2:5000/api/forgot-password',
+        'http://172.20.10.3:5000/api/forgot-password',
         { email }
       );
 
@@ -35,7 +35,7 @@ export const PasswordResetProvider = ({ children }) => {
     try {
       setIsLoading(true);
       const response = await axios.post(
-        'http://172.20.10.2:5000/api/verify-otp',
+        'http://172.20.10.3:5000/api/verify-otp',
         { email, otp }
       );
 
@@ -60,7 +60,7 @@ export const PasswordResetProvider = ({ children }) => {
       console.log('Data yang dikirim ke API reset-password:', { email, otp, newPassword });
   
       const response = await axios.post(
-        'http://172.20.10.2:5000/api/reset-password',
+        'http://172.20.10.3:5000/api/reset-password',
         { email, otp, newPassword }
       );
   

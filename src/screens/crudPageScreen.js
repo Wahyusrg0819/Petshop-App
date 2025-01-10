@@ -9,7 +9,8 @@ import {
   Image,
   Alert,
   SafeAreaView,
-  
+  Platform,
+  StatusBar,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
@@ -107,7 +108,7 @@ const handleAddProduct = async () => {
       fileName
     });
 
-    const response = await fetch('http://172.20.10.2:5000/api/addProduct', {
+    const response = await fetch('http://172.20.10.3:5000/api/addProduct', {
       method: 'POST',
       body: formData,
       headers: {
@@ -143,82 +144,101 @@ const handleAddProduct = async () => {
 };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
-    <ScrollView style={styles.container}>
-      {/* Upload Gambar */}
-      <TouchableOpacity style={styles.imagePlaceholder} onPress={pickImage}>
-        {image ? (
-          <Image source={{ uri: image }} style={styles.image} />
-        ) : (
-          <Text style={styles.uploadText}>Upload Gambar</Text>  
-        ) }
-      </TouchableOpacity> 
-
-      {/* Input Fields */}
-      <TextInput
-        style={styles.input}
-        placeholder="Nama Produk"
-        value={name}
-        onChangeText={setName}
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Deskripsi Produk"
-        value={description}
-        onChangeText={setDescription}
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Harga"
-        keyboardType="numeric"
-        value={price}
-        onChangeText={setPrice}
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Stok"
-        keyboardType="numeric"
-        value={stock}
-        onChangeText={setStock}
-      />
-
-      {/* Dropdown Kategori */}
-      <View style={styles.pickerContainer}>
-        <Picker
-          selectedValue={categoryId}
-          onValueChange={(itemValue) => setCategoryId(itemValue)}
-        >
-          <Picker.Item label="Pilih Kategori" value="" />
-          {categories.map((category) => (
-            <Picker.Item key={category.value} label={category.label} value={category.value} />
-          ))}
-        </Picker>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.headerContainer}>
+        <Text style={styles.headerTitle}>Tambah Produk</Text>
       </View>
+      <ScrollView style={styles.container}>
+        {/* Upload Gambar */}
+        <TouchableOpacity style={styles.imagePlaceholder} onPress={pickImage}>
+          {image ? (
+            <Image source={{ uri: image }} style={styles.image} />
+          ) : (
+            <Text style={styles.uploadText}>Upload Gambar</Text>  
+          ) }
+        </TouchableOpacity> 
 
-      {/* Submit Button */}
-      <TouchableOpacity
-        style={styles.submitButton}
-        onPress={handleAddProduct}
-        disabled={loading}
-      >
-        <Text style={styles.submitButtonText}>
-          {loading ? 'Menambahkan...' : 'Tambahkan'}
-        </Text>
-      </TouchableOpacity>
-    </ScrollView>
+        {/* Input Fields */}
+        <TextInput
+          style={styles.input}
+          placeholder="Nama Produk"
+          value={name}
+          onChangeText={setName}
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Deskripsi Produk"
+          value={description}
+          onChangeText={setDescription}
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Harga"
+          keyboardType="numeric"
+          value={price}
+          onChangeText={setPrice}
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Stok"
+          keyboardType="numeric"
+          value={stock}
+          onChangeText={setStock}
+        />
+
+        {/* Dropdown Kategori */}
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={categoryId}
+            onValueChange={(itemValue) => setCategoryId(itemValue)}
+          >
+            <Picker.Item label="Pilih Kategori" value="" />
+            {categories.map((category) => (
+              <Picker.Item key={category.value} label={category.label} value={category.value} />
+            ))}
+          </Picker>
+        </View>
+
+        {/* Submit Button */}
+        <TouchableOpacity
+          style={styles.submitButton}
+          onPress={handleAddProduct}
+          disabled={loading}
+        >
+          <Text style={styles.submitButtonText}>
+            {loading ? 'Menambahkan...' : 'Tambahkan'}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
+  headerContainer: {
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'android' ? 10 : 16,
+    paddingBottom: 16,
+    backgroundColor: '#F5F5F5',
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    textAlign: "center",
+    color: "#333",
+  },
   container: {
     flex: 1,
     backgroundColor: '#F5F5F5',
     padding: 20,
-    
   },
   imagePlaceholder: {
     backgroundColor: '#E0E0E0',

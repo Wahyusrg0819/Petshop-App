@@ -9,137 +9,149 @@ import {
   SafeAreaView,
   ActivityIndicator,
   Alert,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import ModalScreen from './ModalScreen';
+import ModalScreenAndroid from './ModalScreenAndroid';
 import { useAuth } from '../context/AuthContext';
+import PromoCarousel from '../components/PromoCarousel';
 
+// 1) Import AddToCartModal di sini
+import FloatingNotification from '../components/FloatingNotification';
+import {
+  configureReanimatedLogger,
+  ReanimatedLogLevel,
+} from 'react-native-reanimated';
+import { useNavigation } from '@react-navigation/native';
 
-
+// This is the default configuration
+configureReanimatedLogger({
+  level: ReanimatedLogLevel.warn,
+  strict: false, // Reanimated runs in strict mode by default
+});
 
 const INITIAL_NUM_PRODUCTS = 6;
 const LOAD_MORE_NUM_PRODUCTS = 6;
 
-const HomeScreen = ({ navigation, }) => {
+const HomeScreen = () => {
+  const navigation = useNavigation();
   const { userData } = useAuth(); // Akses userData
-  const  user_id = userData?.user_id; // Ambil user_id dari userData
+  const user_id = userData?.user_id; // Ambil user_id dari userData
+  const address = userData?.address
+
   const [categories, setCategories] = useState([]);
-  const [products, setProducts] = useState([]); // Mengakses cart dan addToCart dari CartContext
+  const [products, setProducts] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('Pakan');
   const [isLocationModalVisible, setIsLocationModalVisible] = useState(false);
   const [location, setLocation] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
-  const [locationName, setLocationName] = useState('Fetching location...');
+  const [locationName, setLocationName] = useState(address || 'Fetching location...');
   
   // State untuk pagination
   const [visibleProducts, setVisibleProducts] = useState([]);
   const [numProducts, setNumProducts] = useState(INITIAL_NUM_PRODUCTS);
   const [isLoading, setIsLoading] = useState(false);
 
-  
-  
+  // 2) State untuk menampilkan modal add-to-cart
+  const [showNotification, setShowNotification] = useState(false);
+
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const API_BASE_URL = 'http://172.20.10.3:5000';
+
+  const ModalComponent = Platform.OS === 'android' ? ModalScreenAndroid : ModalScreen;
 
   useEffect(() => {
     const fetchCategoryAndProductData = async () => {
       try {
-        // Memulai loading
         setIsLoading(true);
-  
-        // Ambil data produk dari API
-        const response = await fetch('http://172.20.10.2:5000/api/all');
+        const response = await fetch('http://172.20.10.3:5000/api/all');
         const data = await response.json();
-  
+
         if (!data.products || !Array.isArray(data.products)) {
           console.error('API response does not contain products array:', data);
           return;
         }
-  
-        // Definisikan kategori secara manual
+
         const fetchedCategories = [
           { id: '1', name: 'Pakan', isActive: true },
           { id: '2', name: 'Mainan', isActive: false },
           { id: '3', name: 'Accessories', isActive: false },
         ];
-  
+
         const fetchedProducts = data.products.map(product => ({
           id: product.product_id.toString(),
           name: product.name,
           description: product.description || 'No description available',
           price: parseFloat(product.price),
-          image: product.productPict || '../../assets/images/default-avatar-image.png',
+          image: product.productPict ? product.productPict : null,
           category: fetchedCategories.find(cat => cat.id === product.category_id.toString())?.name || 'Unknown',
           stock: product.stock,
         }));
-  
+
         setCategories(fetchedCategories);
         setProducts(fetchedProducts);
-  
-        // Load produk awal berdasarkan kategori aktif
         loadProducts(fetchedProducts, fetchedCategories[0]?.name || '');
-  
       } catch (error) {
         console.error('Error fetching product data:', error);
       } finally {
-        // Selesai loading
         setIsLoading(false);
       }
     };
-  
+
     fetchCategoryAndProductData();
   }, []);
-  
+
   const loadProducts = (allProducts = products, category = selectedCategory) => {
     const filtered = allProducts
       .filter((product) => product.category === category)
       .slice(0, numProducts);
     setVisibleProducts(filtered);
   };
-  
+
   useEffect(() => {
-    // Load ulang produk saat kategori atau jumlah produk berubah
     loadProducts();
   }, [selectedCategory, numProducts]);
-  
+
   const handleLoadMore = () => {
     if (isLoading) return;
-  
+
     const filtered = products.filter((product) => product.category === selectedCategory);
     if (numProducts >= filtered.length) return;
-  
+
     setIsLoading(true);
-  
-    // Simulasi loading tambahan
     setTimeout(() => {
       setNumProducts((prev) => prev + LOAD_MORE_NUM_PRODUCTS);
       setIsLoading(false);
-    }, 1000); // Waktu delay dipersingkat
+    }, 1000);
   };
 
+  // 3) Ubah fungsi addToCart agar menampilkan modal jika sukses
   const addToCart = async (product, userId) => {
     try {
       const payload = {
         user_id: userId,
         product_id: product.id,
-        productPict: product.image, // Menambahkan gambar produk
-        quantity: 1, // Default quantity
-        price: product.price, // Harga produk
+        productPict: product.image,
+        quantity: 1,
+        price: product.price,
       };
-  
-      console.log('Payload:', payload); // Debugging
-  
-      const response = await fetch('http://172.20.10.2:5000/api/addcart', {
+
+      console.log('Payload:', payload);
+
+      const response = await fetch('http://172.20.10.3:5000/api/addcart', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
       });
-  
+
       const data = await response.json();
-  
+
       if (response.ok) {
-        Alert.alert('Success', 'Product added to cart!');
+        setShowNotification(true);
       } else {
         Alert.alert('Error', data.message || 'Failed to add product to cart');
       }
@@ -148,60 +160,11 @@ const HomeScreen = ({ navigation, }) => {
       Alert.alert('Error', 'Something went wrong. Please try again.');
     }
   };
-  
 
-  const fetchUserLocation = async () => {
-    try {
-      // Minta izin lokasi
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setErrorMsg('Permission to access location was denied');
-        setLocationName('Permission denied');
-        return;
-      }
-  
-      // Ambil lokasi saat ini dengan timeout
-      const currentLocation = await Promise.race([
-        Location.getCurrentPositionAsync({}),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Location timeout')), 5000) // Timeout setelah 5 detik
-        ),
-      ]);
-  
-      setLocation(currentLocation);
-  
-      // Perbarui lokasi awal sebagai koordinat kasar
-      const { latitude, longitude } = currentLocation.coords;
-      setLocationName(`Lat: ${latitude.toFixed(4)}, Lon: ${longitude.toFixed(4)}`);
-  
-      // Jalankan reverse geocoding secara paralel
-      (async () => {
-        try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-          );
-          const data = await response.json();
-          if (data && data.address) {
-            setLocationName(
-              data.address.village ||
-                data.address.town ||
-                data.address.city ||
-                'Unknown location'
-            );
-          } else {
-            setLocationName('Unknown location');
-          }
-        } catch (error) {
-          console.error('Error during reverse geocoding:', error);
-          setLocationName('Error fetching location name');
-        }
-      })();
-    } catch (error) {
-      console.error('Error fetching user location:', error);
-      setLocationName('Error fetching location');
-    }
+  // Tambahkan fungsi untuk menutup notifikasi
+  const handleHideNotification = () => {
+    setShowNotification(false);
   };
-  
 
   const handleCategoryPress = (categoryName) => {
     setSelectedCategory(categoryName);
@@ -212,7 +175,6 @@ const HomeScreen = ({ navigation, }) => {
           : { ...category, isActive: false }
       )
     );
-    // Reset jumlah produk saat kategori berubah
     setNumProducts(INITIAL_NUM_PRODUCTS);
   };
 
@@ -223,7 +185,6 @@ const HomeScreen = ({ navigation, }) => {
     }
     addToCart(product, user_id);
   };
-  
 
   const renderCategory = (item) => (
     <TouchableOpacity
@@ -237,32 +198,34 @@ const HomeScreen = ({ navigation, }) => {
     </TouchableOpacity>
   );
 
+
   const renderProduct = ({ item }) => {
-    // Format harga dengan simbol Rp
-    const formattedPrice = parseFloat(item.price).toLocaleString('id-ID', {
+    const formattedPrice = item.price.toLocaleString('id-ID', {
       style: 'currency',
       currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     });
-  
+
     return (
       <TouchableOpacity
         style={styles.productCard}
         onPress={() => 
-          
-          navigation.navigate('ProductDetailScreen', { product: item })}
-
+          navigation.navigate('ProductDetailScreen', { product: item })
+        }
       >
-        <Image source={{ uri: item.image }} style={styles.productImage} />
+        <Image 
+          source={item.image ? { uri: item.image } : require('../../assets/images/no-image.png')} 
+          style={styles.productImage} 
+        />
         <Text style={styles.productName}>{item.name}</Text>
         <View style={styles.productFooter}>
-          {/* Tampilkan harga yang sudah diformat */}
           <Text style={styles.productPrice}>{formattedPrice}</Text>
-  
           <TouchableOpacity
             style={styles.addButton}
             onPress={(e) => {
-              e.stopPropagation(); // Menghindari navigasi
-              handleAddToCart(item); // Memanggil fungsi untuk menambahkan ke cart
+              e.stopPropagation();
+              handleAddToCart(item);
             }}
           >
             <Ionicons name="add" size={20} color="#ffffff" fontWeight="bold" />
@@ -272,7 +235,6 @@ const HomeScreen = ({ navigation, }) => {
     );
   };
   
-
   const renderFooter = () => {
     if (!isLoading) return null;
     return (
@@ -282,113 +244,204 @@ const HomeScreen = ({ navigation, }) => {
     );
   };
 
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#ffffff" }}>
-      <View style={styles.container}>
-        <FlatList
-          data={visibleProducts}
-          renderItem={renderProduct}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          columnWrapperStyle={styles.row}
-          showsVerticalScrollIndicator={false}
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.5}
-          ListHeaderComponent={
-            <>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => setIsLocationModalVisible(true)}>
-          <Text style={styles.locationLabel}>Location</Text>
-          <Text style={styles.locationValue}>{locationName}</Text>
-        </TouchableOpacity>
-        <View style={styles.headerIcons}>
-          <TouchableOpacity style={styles.iconButton}>
-            <FontAwesome5 name="search" size={20} color="#7a7a7a" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <FontAwesome5 name="bell" size={20} color="#7a7a7a" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => navigation.navigate('CartScreen')}
-          >
-            <Ionicons name="cart" size={20} color="#7a7a7a" />
-          </TouchableOpacity>
+  // Fungsi untuk mengecek notifikasi yang belum dibaca
+  const checkUnreadNotifications = async () => {
+    try {
+      // Jika user login, cek notifikasi user
+      if (userData?.user_id) {
+        const response = await fetch(`${API_BASE_URL}/api/notifications/user/${userData.user_id}`);
+        const data = await response.json();
 
-        </View>
+        if (response.ok) {
+          // Hitung notifikasi yang belum dibaca
+          const unreadCount = data.filter(notification => !notification.is_read).length;
+          setUnreadNotifications(unreadCount);
+        }
+      } else {
+        // Jika tidak login, cek notifikasi umum (tipe promo)
+        const response = await fetch(`${API_BASE_URL}/api/notifications/public`);
+        const data = await response.json();
+
+        if (response.ok) {
+          // Hitung notifikasi promo yang belum dibaca
+          const unreadCount = data.filter(notification => 
+            !notification.is_read && notification.type === 'promo'
+          ).length;
+          setUnreadNotifications(unreadCount);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking notifications:', error);
+    }
+  };
+
+  useEffect(() => {
+    // Cek notifikasi saat komponen dimount
+    checkUnreadNotifications();
+
+    // Set interval untuk mengecek notifikasi setiap 30 detik
+    const intervalId = setInterval(checkUnreadNotifications, 30000);
+
+    // Cek notifikasi setiap kali screen mendapat fokus
+    const unsubscribeFocus = navigation.addListener('focus', () => {
+      checkUnreadNotifications();
+    });
+
+    // Cleanup interval dan listener saat komponen unmount
+    return () => {
+      clearInterval(intervalId);
+      unsubscribeFocus();
+    };
+  }, [navigation, userData]);
+
+  // Render icon notifikasi dengan badge
+  const renderNotificationIcon = () => (
+    <TouchableOpacity 
+      style={styles.iconButton}
+      onPress={() => navigation.navigate('NotificationScreen')}
+    >
+      <View>
+        <FontAwesome5 name="bell" size={20} color="#7a7a7a" />
+        {unreadNotifications > 0 && (
+          <View style={styles.notificationBadge}>
+            {unreadNotifications > 99 ? (
+              <Text style={styles.badgeText}>99+</Text>
+            ) : (
+              <Text style={styles.badgeText}>{unreadNotifications}</Text>
+            )}
+          </View>
+        )}
       </View>
+    </TouchableOpacity>
+  );
 
-              <View style={styles.promoCard}>
-                <Text style={styles.promoTitle}>Royal Canin Adult Pomeranian</Text>
-                <Text style={styles.promoDescription}>
-                  Get an interesting promo here, without conditions
-                </Text>
-              </View>
+  return (
+    <View style={styles.mainContainer}>
+      <FloatingNotification
+        visible={showNotification}
+        message="Produk berhasil ditambahkan ke keranjang!"
+        onHide={handleHideNotification}
+      />
 
-              <View style={styles.categorySection}>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Category</Text>
-                </View>
-                <FlatList
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  data={categories}
-                  renderItem={({ item }) => renderCategory(item)}
-                  keyExtractor={(item) => item.id}
-                  contentContainerStyle={styles.categoriesContainer}
-                />
-              </View>
-
-              <View style={styles.productSection}>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle2}>Product</Text>
-                  <TouchableOpacity
-                    onPress={() =>
-                      navigation.navigate("ProductScreen", { products })
-                    }
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
+          <FlatList
+            data={visibleProducts}
+            renderItem={renderProduct}
+            keyExtractor={(item) => item.id}
+            numColumns={2}
+            columnWrapperStyle={styles.row}
+            showsVerticalScrollIndicator={false}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.5}
+            ListHeaderComponent={
+              <>
+                <View style={styles.header}>
+                  <TouchableOpacity 
+                    onPress={() => {
+                      console.log('Location button pressed');
+                      setIsLocationModalVisible(true);
+                    }}
                   >
-                    <Text style={styles.viewAllText}>View All</Text>
+                    <Text style={styles.locationLabel}>Location</Text>
+                    <Text style={styles.locationValue}>
+                      {locationName.length > 25
+                        ? `${locationName.slice(0, 25)}...`
+                        : locationName}
+                    </Text>
                   </TouchableOpacity>
+                  <View style={styles.headerIcons}>
+                    {renderNotificationIcon()}
+                    <TouchableOpacity
+                      style={styles.iconButton}
+                      onPress={() => navigation.navigate('CartScreen')}
+                    >
+                      <Ionicons name="cart" size={20} color="#7a7a7a" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-            </>
-          }
-          ListFooterComponent={renderFooter}
-        />
 
-        <ModalScreen
+                <PromoCarousel />
+
+                <View style={styles.categorySection}>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>Category</Text>
+                  </View>
+                  <FlatList
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    data={categories}
+                    renderItem={({ item }) => renderCategory(item)}
+                    keyExtractor={(item) => item.id}
+                    contentContainerStyle={styles.categoriesContainer}
+                  />
+                </View>
+
+                <View style={styles.productSection}>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle2}>Product</Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        navigation.navigate("ProductScreen", { products })
+                      }
+                    >
+                      <Text style={styles.viewAllText}>View All</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </>
+            }
+            ListFooterComponent={renderFooter}
+          />
+        </View>
+      </SafeAreaView>
+      
+      {isLocationModalVisible && (
+        <ModalComponent
           isVisible={isLocationModalVisible}
-          onClose={() => setIsLocationModalVisible(false)}
-          fetchUserLocation={fetchUserLocation}
+          onClose={() => {
+            console.log('Closing modal');
+            setIsLocationModalVisible(false);
+          }}
           location={location}
           errorMsg={errorMsg}
           setLocationName={setLocationName}
         />
-      </View>
-    </SafeAreaView>
+      )}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
   container: {
     flex: 1,
     backgroundColor: '#ffffff',
-    paddingHorizontal: 20,
+    paddingHorizontal: Platform.OS === 'android' ? 10 : 12,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 20,
-    marginBottom: 10,
+    marginTop: Platform.OS === 'android' ? 0 : 10,
+    marginBottom: Platform.OS === 'android' ? 10 : 10,
+    paddingVertical: Platform.OS === 'android' ? 12 : 0,
   },
   locationLabel: {
     fontSize: 12,
     color: '#7a7a7a',
   },
   locationValue: {
-    fontSize: 16,
+    fontSize: Platform.OS === 'android' ? 14 : 16,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: Platform.OS === 'android' ? 8 : 10,
   },
   headerIcons: {
     flexDirection: 'row',
@@ -396,65 +449,44 @@ const styles = StyleSheet.create({
   iconButton: {
     backgroundColor: '#f2f2f2',
     borderRadius: 10,
-    width: 40,
-    height: 40,
+    width: Platform.OS === 'android' ? 35 : 40,
+    height: Platform.OS === 'android' ? 35 : 40,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 10,
-  },
-  promoCard: {
-    backgroundColor: '#d4edda',
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  promoTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  promoDescription: {
-    fontSize: 14,
-    color: '#7a7a7a',
+    marginLeft: 8,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: Platform.OS === 'android' ? 8 : 10,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: Platform.OS === 'android' ? 16 : 18,
     fontWeight: 'bold',
   },
   sectionTitle2: {
-    fontSize: 18,
+    fontSize: Platform.OS === 'android' ? 16 : 18,
     fontWeight: 'bold',
-    marginTop: 20,
-  },
-  viewAllText: {
-    fontSize: 14,
-    color: '#8bc34a',
+    marginTop: Platform.OS === 'android' ? 8 : 10,
   },
   categoriesContainer: {
     flexDirection: 'row',
-    marginTop: 10,
+    marginTop: Platform.OS === 'android' ? 8 : 10,
+    paddingVertical: Platform.OS === 'android' ? 4 : 0,
   },
   categoryButton: {
     backgroundColor: '#f2f2f2',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+    paddingHorizontal: Platform.OS === 'android' ? 12 : 15,
+    paddingVertical: Platform.OS === 'android' ? 8 : 10,
     borderRadius: 20,
-    marginRight: 10,
+    marginRight: 8,
   },
   activeCategoryButton: {
     backgroundColor: '#8bc34a',
   },
   categoryText: {
-    fontSize: 14,
+    fontSize: Platform.OS === 'android' ? 13 : 14,
     color: '#7a7a7a',
   },
   activeCategoryText: {
@@ -463,58 +495,90 @@ const styles = StyleSheet.create({
   },
   row: {
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: Platform.OS === 'android' ? 16 : 20,
   },
   productCard: {
     width: '48%',
+    height: Platform.OS === 'android' ? 200 : 220,
     backgroundColor: '#f9f9f9',
     borderRadius: 10,
-    padding: 15,
-    alignItems: 'center',
+    padding: Platform.OS === 'android' ? 12 : 15,
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
+    display: 'flex',
+    flexDirection: 'column',
   },
   productImage: {
-    width: 100,
-    height: 100,
+    width: Platform.OS === 'android' ? 90 : 100,
+    height: Platform.OS === 'android' ? 90 : 100,
     resizeMode: 'contain',
-    marginBottom: 10,
+    marginBottom: Platform.OS === 'android' ? 6 : 8,
+    alignSelf: 'center',
   },
   productName: {
-    fontSize: 14,
-    textAlign: 'left',
-    marginBottom: 8,
+    fontSize: Platform.OS === 'android' ? 13 : 14,
+    width: '100%',
+    minHeight: Platform.OS === 'android' ? 35 : 40,
+    maxHeight: Platform.OS === 'android' ? 35 : 40,
+    overflow: 'hidden',
+  },
+  productDescription: {
+    fontSize: Platform.OS === 'android' ? 11 : 12,
+    width: '100%',
+    height: Platform.OS === 'android' ? 25 : 30,
+    overflow: 'hidden',
+    color: '#666',
   },
   productFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
+    marginTop: Platform.OS === 'android' ? 6 : 8,
   },
   productPrice: {
-    fontSize: 15,
+    fontSize: Platform.OS === 'android' ? 14 : 16,
     fontWeight: 'bold',
     color: '#333',
   },
   addButton: {
     backgroundColor: '#C0EBA6',
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: Platform.OS === 'android' ? 28 : 30,
+    height: Platform.OS === 'android' ? 28 : 30,
+    borderRadius: Platform.OS === 'android' ? 14 : 15,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  addButtonText: {
-    color: '#ffffff',
-    fontSize: 18,
-  },
   productSection: {
-    marginBottom: 20,
+    marginBottom: Platform.OS === 'android' ? 8 : 10,
   },
   footer: {
-    paddingVertical: 20,
+    paddingVertical: Platform.OS === 'android' ? 16 : 20,
+  },
+  viewAllText: {
+    color: '#8bc34a',
+    fontSize: Platform.OS === 'android' ? 13 : 14,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    right: -6,
+    top: -6,
+    backgroundColor: '#FF0000',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
 });
 

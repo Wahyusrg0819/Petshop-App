@@ -10,67 +10,81 @@ import {
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
-import { useAuth } from "../context/AuthContext"; // Import AuthContext untuk data pengguna
+import { useAuth } from "../context/AuthContext";
 
 const ScheduleScreen = ({ route, navigation }) => {
-  const { category } = route.params; // Mengambil data hewan dari route.params
-  const { userData } = useAuth(); // Ambil data pengguna dari AuthContext
+  const { category } = route.params;
+  const { userData } = useAuth();
+  const API_BASE_URL = 'http://172.20.10.3:5000';
 
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
-  const [pricePerDay] = useState(10.0); // Biaya penitipan per hari
-  const [tax] = useState(2.0); // Pajak tetap
+  const [pricePerDay] = useState(25000);
+  const [tax] = useState(2000);
 
   const calculateTotal = () => {
     if (!startDate || !endDate) return 0;
 
-    const diffInDays =
-      Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
-
-    if (diffInDays <= 0) {
-      return 0;
-    }
+    const diffInDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    if (diffInDays <= 0) return 0;
 
     const subtotal = diffInDays * pricePerDay;
-    return (subtotal + tax).toFixed(2);
+    return subtotal + tax;
   };
 
   const handleBooking = async () => {
     if (!startDate || !endDate) {
-      Alert.alert("Error", "Please select both start and end dates.");
+      Alert.alert("Error", "Silakan pilih tanggal mulai dan selesai");
       return;
     }
 
     if (!userData) {
-      Alert.alert("Error", "User data not available. Please log in.");
+      Alert.alert("Error", "Silakan login terlebih dahulu");
       return;
     }
 
-    // Detail booking penitipan hewan
-    const bookingDetails = {
-      user: {
-        id: userData.id,
-        name: userData.name,
-        email: userData.email,
-      },
-      pet: {
-        id: category.id,
-        name: category.name, // Nama hewan (anjing, kucing, dll.)
-      },
-      startDate: startDate.toLocaleDateString(),
-      endDate: endDate.toLocaleDateString(),
-      total: calculateTotal(),
+    const diffInDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    const total = calculateTotal();
+
+    const bookingData = {
+      user_id: userData.user_id,
+      pet_category: category.name,
+      start_date: startDate.toISOString(),
+      end_date: endDate.toISOString(),
+      duration_days: diffInDays,
+      price_per_day: pricePerDay,
+      tax: tax,
+      total_price: total,
+      date: new Date().toISOString()
     };
 
-    // Simulasi konfirmasi booking
-    Alert.alert(
-      "Booking Confirmed",
-      `Booking Details:\n\nUser: ${bookingDetails.user.name}\nPet: ${bookingDetails.pet.name}\nPeriod: ${bookingDetails.startDate} - ${bookingDetails.endDate}\nTotal: $${bookingDetails.total}`
-    );
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pet-boarding/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(bookingData)
+      });
 
-    // TODO: Kirim `bookingDetails` ke server jika diperlukan
+      const result = await response.json();
+
+      if (response.ok) {
+        navigation.navigate('BookingSuccess', {
+          bookingData: {
+            ...bookingData,
+            booking_id: result.booking_id
+          }
+        });
+      } else {
+        Alert.alert("Error", result.message || "Gagal membuat pesanan");
+      }
+    } catch (error) {
+      console.error('Error creating booking:', error);
+      Alert.alert("Error", "Terjadi kesalahan saat membuat pesanan");
+    }
   };
 
   return (
@@ -142,20 +156,20 @@ const ScheduleScreen = ({ route, navigation }) => {
         {/* Summary */}
         <View style={styles.summary}>
           <Text style={styles.summaryText}>
-            Periode:{" "}
+            Periode: {" "}
             {startDate && endDate
               ? `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`
               : "Select dates"}
           </Text>
           <Text style={styles.summaryText}>
-            ${pricePerDay.toFixed(2)} x{" "}
+            Rp{pricePerDay.toLocaleString()} x {" "}
             {startDate && endDate
               ? Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1
-              : 0}{" "}
+              : 0} {" "}
             days
           </Text>
-          <Text style={styles.summaryText}>Tax: ${tax.toFixed(2)}</Text>
-          <Text style={styles.totalText}>Total: ${calculateTotal()}</Text>
+          <Text style={styles.summaryText}>Tax: Rp{tax.toFixed(2)}</Text>
+          <Text style={styles.totalText}>Total: Rp{calculateTotal()}</Text>
         </View>
 
         {/* Booking Button */}

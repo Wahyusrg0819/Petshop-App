@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -9,16 +9,66 @@ import {
   SafeAreaView,
   Alert,
   Animated,
+  Platform,
+  Dimensions,
+  PanResponder,
+  StatusBar,
 } from "react-native";
-import { FontAwesome5 } from "@expo/vector-icons";
+import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
 import { Swipeable } from "react-native-gesture-handler";
+import { useNavigation } from '@react-navigation/native';
+import DeleteCartModal from '../components/DeleteCartModal';
+import Modal from 'react-native-modal';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const CHECKOUT_HEIGHT = 280; // Perkiraan tinggi checkout container
 
 const CartScreen = () => {
+  const navigation = useNavigation();
   const [cart, setCart] = useState([]);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
-  const [taxRate] = useState(0.12); // 12% tax
   const { userData } = useAuth();
+  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [isCheckoutVisible, setIsCheckoutVisible] = useState(false);
+  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const translateY = useRef(new Animated.Value(CHECKOUT_HEIGHT)).current;
+  const lastGestureDy = useRef(0);
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        lastGestureDy.current = translateY._value;
+      },
+      onPanResponderMove: (_, { dy }) => {
+        const newValue = lastGestureDy.current + dy;
+        if (newValue >= 0) {
+          translateY.setValue(newValue);
+        }
+      },
+      onPanResponderRelease: (_, { dy, vy }) => {
+        if (dy > 50 || vy > 0.5) {
+          // Swipe down
+          Animated.spring(translateY, {
+            toValue: CHECKOUT_HEIGHT,
+            useNativeDriver: true,
+            bounciness: 0,
+            speed: 12,
+          }).start(() => setSelectedProductIds([]));
+        } else {
+          // Return to top
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 4,
+            speed: 12,
+          }).start();
+        }
+      },
+    })
+  ).current;
 
   const fetchCartData = async () => {
     if (!userData || !userData.user_id) {
@@ -28,7 +78,7 @@ const CartScreen = () => {
 
     try {
       const response = await fetch(
-        `http://172.20.10.2:5000/api/view/${userData.user_id}`
+        `http://172.20.10.3:5000/api/view/${userData.user_id}`
       );
       const data = await response.json();
 
@@ -39,7 +89,10 @@ const CartScreen = () => {
       }
     } catch (error) {
       console.error("Error fetching cart data:", error);
-      Alert.alert("Error", "An unexpected error occurred while fetching cart data");
+      Alert.alert(
+        "Error",
+        "An unexpected error occurred while fetching cart data"
+      );
     }
   };
 
@@ -47,10 +100,28 @@ const CartScreen = () => {
     fetchCartData();
   }, [userData]);
 
+  useEffect(() => {
+    if (selectedProductIds.length > 0 && !isDeleteMode) {
+      Animated.spring(translateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        bounciness: 4,
+        speed: 12,
+      }).start();
+    } else {
+      Animated.spring(translateY, {
+        toValue: CHECKOUT_HEIGHT,
+        useNativeDriver: true,
+        bounciness: 0,
+        speed: 12,
+      }).start();
+    }
+  }, [selectedProductIds, isDeleteMode]);
+
   const handleRemoveFromCart = async (cart_id) => {
     try {
       const response = await fetch(
-        `http://172.20.10.2:5000/api/delete/${cart_id}`,
+        `http://172.20.10.3:5000/api/delete/${cart_id}`,
         {
           method: "DELETE",
         }
@@ -59,14 +130,18 @@ const CartScreen = () => {
       const data = await response.json();
 
       if (response.ok) {
-        Alert.alert("Success", "Product removed from cart");
+        setSelectedProductIds(prev => prev.filter(id => id !== cart_id));
         setCart((prevCart) => prevCart.filter((item) => item.cart_id !== cart_id));
+        setIsDeleteModalVisible(true);
       } else {
         Alert.alert("Error", data.message || "Failed to remove product from cart");
       }
     } catch (error) {
       console.error("Error removing product from cart:", error);
-      Alert.alert("Error", "An unexpected error occurred while removing product");
+      Alert.alert(
+        "Error",
+        "An unexpected error occurred while removing product"
+      );
     }
   };
 
@@ -76,24 +151,6 @@ const CartScreen = () => {
         ? prev.filter((id) => id !== productId)
         : [...prev, productId]
     );
-  };
-
-  const calculateTotal = () => {
-    const selectedItems = cart.filter((item) =>
-      selectedProductIds.includes(item.cart_id)
-    );
-    const subtotal = selectedItems.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
-    const tax = subtotal * taxRate;
-    const total = subtotal + tax;
-
-    return {
-      subtotal: subtotal.toFixed(2),
-      tax: tax.toFixed(2),
-      total: total.toFixed(2),
-    };
   };
 
   const renderRightActions = (progress, dragX, cart_id) => {
@@ -108,8 +165,14 @@ const CartScreen = () => {
         style={styles.deleteAction}
         onPress={() => handleRemoveFromCart(cart_id)}
       >
-        <Animated.View style={{ transform: [{ scale }] }}>
-          <FontAwesome5 name="trash" size={24} color="#fff" />
+        <Animated.View 
+          style={[
+            styles.deleteActionContent,
+            { transform: [{ scale }] }
+          ]}
+        >
+          <FontAwesome5 name="trash" size={20} color="#fff" />
+          <Text style={styles.deleteActionText}>Delete</Text>
         </Animated.View>
       </TouchableOpacity>
     );
@@ -120,6 +183,7 @@ const CartScreen = () => {
 
     return (
       <Swipeable
+        enabled={!isDeleteMode}
         renderRightActions={(progress, dragX) =>
           renderRightActions(progress, dragX, item.cart_id)
         }
@@ -127,233 +191,441 @@ const CartScreen = () => {
         <TouchableOpacity
           style={[styles.cartItem, isSelected && styles.selectedItem]}
           onPress={() => handleSelectProduct(item.cart_id)}
+          activeOpacity={0.7}
         >
           <Image
             source={{ uri: item.productPict }}
             style={styles.cartItemImage}
           />
           <View style={styles.productDetails}>
-            <Text style={styles.productName}>{item.product_name}</Text>
+            <Text style={styles.productName}>
+              {item.product_name.length > 20
+                ? item.product_name.slice(0, 20) + "..."
+                : item.product_name}
+            </Text>
             <Text style={styles.productDescription}>
-              Untuk {item.product_description}
+              {item.description && item.description.length > 35
+                ? item.description.slice(0, 35) + "..."
+                : item.description || "No description available"}
             </Text>
             <Text style={styles.productPrice}>
-              Rp{parseFloat(item.price).toFixed(2)}
+              Rp {parseFloat(item.price).toLocaleString("id-ID")}
             </Text>
+          </View>
+          <View style={styles.quantityBadge}>
+            <Text style={styles.quantityBadgeText}>{item.quantity}</Text>
           </View>
         </TouchableOpacity>
       </Swipeable>
     );
   };
 
-  const renderCheckout = () => {
-    const { subtotal, tax, total } = calculateTotal();
-
-    return (
-      <View style={styles.checkoutContainer}>
-        <View style={styles.checkoutSummary}>
-          <Text style={styles.checkoutText}>Subtotal:</Text>
-          <Text style={styles.checkoutText}>Rp{subtotal}</Text>
-        </View>
-        <View style={styles.checkoutSummary}>
-          <Text style={styles.checkoutText}>Tax:</Text>
-          <Text style={styles.checkoutText}>Rp{tax}</Text>
-        </View>
-        <View style={styles.checkoutSummary}>
-          <Text style={styles.checkoutTotalText}>Totals:</Text>
-          <Text style={styles.checkoutTotalText}>Rp{total}</Text>
-        </View>
-        <TouchableOpacity style={styles.checkoutButton}>
-          <Text style={styles.checkoutButtonText}>Checkout</Text>
-        </TouchableOpacity>
-      </View>
+  const calculateTotal = () => {
+    const selectedItems = cart.filter((item) =>
+      selectedProductIds.includes(item.cart_id)
     );
+    const subtotal = selectedItems.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    );
+    const tax = subtotal * 0.12; // pajak 12% sesuai request pak wowo
+    const total = subtotal + tax;
+
+    return {
+      subtotal: subtotal.toFixed(2),
+      tax: tax.toFixed(2),
+      total: total.toFixed(2),
+    };
+  };
+
+  const handleDeleteSelected = async () => {
+    try {
+      for (const cartId of selectedProductIds) {
+        const response = await fetch(
+          `http://172.20.10.3:5000/api/delete/${cartId}`,
+          {
+            method: "DELETE",
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('Failed to delete some items');
+        }
+      }
+      
+      // Update cart setelah delete
+      setCart((prevCart) => prevCart.filter((item) => !selectedProductIds.includes(item.cart_id)));
+      setSelectedProductIds([]);
+      setIsDeleteMode(false);
+      setIsDeleteModalVisible(true);
+    } catch (error) {
+      console.error("Error deleting products:", error);
+      Alert.alert(
+        "Error",
+        "An unexpected error occurred while deleting products"
+      );
+    }
+  };
+
+  const handleCheckout = () => {
+    if(selectedProductIds.length > 0) {
+      const selectedItems = cart.filter(item => selectedProductIds.includes(item.cart_id)).map(item => ({
+        cart_id: item.cart_id,
+        product_id: item.product_id,
+        product_name: item.product_name,
+        productPict: item.productPict,
+        description: item.description,
+        quantity: item.quantity,
+        price: item.price
+      }));
+      const { total } = calculateTotal();
+      navigation.navigate('PaymentMethod', {
+        selectedItems,
+        total: parseFloat(total)
+      });
+    }
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#ffffff" }}>
-      <View style={styles.Container}>
-      <Text style={styles.header}>Keranjang</Text>
-      {cart.length > 0 ? (
-        <>
-          <FlatList
-            data={cart}
-            renderItem={renderCartItem}
-            keyExtractor={(item) => item.cart_id.toString()}
-          />
-          {renderCheckout()}
-        </>
-      ) : (
-        <Text style={styles.emptyCartText}>Your cart is empty</Text>
+    <View style={styles.mainContainer}>
+      <SafeAreaView style={styles.safeArea}>
+        <DeleteCartModal
+          visible={isDeleteModalVisible}
+          onClose={() => setIsDeleteModalVisible(false)}
+        />
+        <View style={styles.Container}>
+          <View style={styles.headerContainer}>
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Ionicons name="arrow-back" size={22} color="#333" />
+            </TouchableOpacity>
+            <Text style={styles.header}>Keranjang</Text>
+            {cart.length > 0 && (
+              <View style={styles.headerActions}>
+                {selectedProductIds.length > 0 && isDeleteMode && (
+                  <TouchableOpacity 
+                    style={[styles.headerButton, { marginRight: 8, backgroundColor: '#fff0f0' }]}
+                    onPress={handleDeleteSelected}
+                  >
+                    <FontAwesome5 name="trash" size={18} color="#ff4d4d" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity 
+                  style={[
+                    styles.headerButton,
+                    isDeleteMode && { backgroundColor: '#fff0f0' }
+                  ]}
+                  onPress={() => {
+                    setIsDeleteMode(!isDeleteMode);
+                    setSelectedProductIds([]);
+                  }}
+                >
+                  <Text style={[
+                    styles.selectButtonText,
+                    isDeleteMode && { color: '#ff4d4d' }
+                  ]}>
+                    {isDeleteMode ? 'Cancel' : 'Select'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          {cart.length > 0 ? (
+            <FlatList
+              data={cart}
+              renderItem={renderCartItem}
+              keyExtractor={(item) => item.cart_id.toString()}
+              contentContainerStyle={[
+                styles.listContainer,
+                selectedProductIds.length > 0 && { paddingBottom: 280 }
+              ]}
+              showsVerticalScrollIndicator={false}
+            />
+          ) : (
+            <Text style={styles.emptyCartText}>Your cart is empty</Text>
+          )}
+        </View>
+      </SafeAreaView>
+      {!isDeleteMode && (
+        <Modal
+          isVisible={selectedProductIds.length > 0}
+          onSwipeComplete={() => setSelectedProductIds([])}
+          swipeDirection={['down']}
+          style={[styles.modal, { pointerEvents: 'box-none' }]}
+          backdropOpacity={0}
+          propagateSwipe={true}
+          useNativeDriver={true}
+          statusBarTranslucent
+          animationIn="slideInUp"
+          animationOut="slideOutDown"
+          animationInTiming={Platform.OS === 'ios' ? 300 : 200}
+          animationOutTiming={Platform.OS === 'ios' ? 300 : 200}
+          backdropTransitionInTiming={0}
+          backdropTransitionOutTiming={0}
+          swipeThreshold={Platform.OS === 'ios' ? 30 : 20}
+          hasBackdrop={false}
+          coverScreen={false}
+        >
+          <View style={styles.checkoutContainer}>
+            <View style={styles.checkoutHandle} />
+            <View style={styles.checkoutContent}>
+              <View style={styles.checkoutSummary}>
+                <Text style={styles.checkoutText}>Subtotal:</Text>
+                <Text style={styles.checkoutText}>
+                  Rp {parseFloat(calculateTotal().subtotal).toLocaleString("id-ID")}
+                </Text>
+              </View>
+              <View style={styles.checkoutSummary}>
+                <Text style={styles.checkoutText}>Tax (12%):</Text>
+                <Text style={styles.checkoutText}>
+                  Rp {parseFloat(calculateTotal().tax).toLocaleString("id-ID")}
+                </Text>
+              </View>
+              <View style={[styles.checkoutSummary, styles.totalRow]}>
+                <Text style={styles.checkoutTotalText}>Total:</Text>
+                <Text style={styles.checkoutTotalText}>
+                  Rp {parseFloat(calculateTotal().total).toLocaleString("id-ID")}
+                </Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.checkoutButton}
+                onPress={handleCheckout}
+              >
+                <Text style={styles.checkoutButtonText}>
+                  Checkout ({selectedProductIds.length} items)
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       )}
     </View>
-    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
   Container: {
     flex: 1,
-    backgroundColor: "#ffffff",
-    paddingTop: 24,
-    paddingHorizontal: 16,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: Platform.OS === 'ios' ? 16 : 14,
   },
   headerContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Platform.OS === 'ios' ? 16 : 12,
+    marginBottom: Platform.OS === 'ios' ? 12 : 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#ffffff',
+  },
+  backButton: {
+    width: Platform.OS === 'ios' ? 40 : 36,
+    height: Platform.OS === 'ios' ? 40 : 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: Platform.OS === 'ios' ? 12 : 10,
+    backgroundColor: '#f8f8f8',
   },
   header: {
-    fontSize: 18,
-    fontWeight: "bold",
+    flex: 1,
+    fontSize: Platform.OS === 'ios' ? 18 : 16,
+    fontWeight: Platform.OS === 'ios' ? '700' : '600',
+    color: '#333',
+    textAlign: 'center',
+    marginHorizontal: Platform.OS === 'ios' ? 12 : 10,
   },
-  cartList: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: Platform.OS === 'ios' ? 100 : 90,
+    justifyContent: 'flex-end',
+  },
+  headerButton: {
+    paddingHorizontal: Platform.OS === 'ios' ? 12 : 10,
+    height: Platform.OS === 'ios' ? 36 : 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: Platform.OS === 'ios' ? 12 : 10,
+    backgroundColor: '#f8f8f8',
+  },
+  selectButtonText: {
+    fontSize: Platform.OS === 'ios' ? 13 : 12,
+    color: '#C0EBA6',
+    fontWeight: '600',
+  },
+  listContainer: {
+    paddingTop: Platform.OS === 'ios' ? 8 : 6,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 16,
   },
   cartItem: {
-    flexDirection: "row",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: Platform.OS === 'ios' ? 16 : 14,
+    padding: Platform.OS === 'ios' ? 12 : 10,
+    marginBottom: Platform.OS === 'ios' ? 12 : 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
     shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 2,
+    shadowRadius: Platform.OS === 'ios' ? 6 : 4,
+    elevation: 3,
+    borderWidth: Platform.OS === 'ios' ? 1 : 0,
+    borderColor: '#f0f0f0',
+    alignItems: 'center',
+    height: Platform.OS === 'ios' ? 104 : 96,
   },
   selectedItem: {
-    borderColor: "#4CAF50",
-    borderWidth: 1,
+    backgroundColor: '#f8fff4',
+    borderColor: '#C0EBA6',
+    borderWidth: Platform.OS === 'ios' ? 1.5 : 1,
   },
   cartItemImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 8,
-    marginRight: 12,
+    width: Platform.OS === 'ios' ? 80 : 76,
+    height: Platform.OS === 'ios' ? 80 : 76,
+    borderRadius: Platform.OS === 'ios' ? 12 : 10,
+    marginRight: Platform.OS === 'ios' ? 12 : 10,
   },
   productDetails: {
     flex: 1,
-    justifyContent: "center",
+    justifyContent: 'space-between',
+    height: Platform.OS === 'ios' ? 80 : 76,
+    paddingVertical: Platform.OS === 'ios' ? 4 : 3,
   },
   productName: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#333",
+    fontSize: Platform.OS === 'ios' ? 15 : 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: Platform.OS === 'ios' ? 4 : 3,
   },
   productDescription: {
-    fontSize: 14,
-    color: "#888",
-    marginTop: 4,
+    fontSize: Platform.OS === 'ios' ? 13 : 12,
+    color: '#666',
+    marginBottom: Platform.OS === 'ios' ? 4 : 3,
+    lineHeight: Platform.OS === 'ios' ? 18 : 16,
   },
   productPrice: {
-    fontSize: 16,
-    color: "#4CAF50",
-    fontWeight: "bold",
-    marginTop: 4,
+    fontSize: Platform.OS === 'ios' ? 16 : 15,
+    color: '#C0EBA6',
+    fontWeight: 'bold',
+  },
+  quantityBadge: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 12 : 10,
+    right: Platform.OS === 'ios' ? 12 : 10,
+    backgroundColor: '#C0EBA6',
+    borderRadius: Platform.OS === 'ios' ? 20 : 18,
+    paddingHorizontal: Platform.OS === 'ios' ? 10 : 8,
+    paddingVertical: Platform.OS === 'ios' ? 4 : 3,
+    minWidth: Platform.OS === 'ios' ? 30 : 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quantityBadgeText: {
+    color: '#fff',
+    fontSize: Platform.OS === 'ios' ? 13 : 12,
+    fontWeight: '600',
   },
   deleteAction: {
-    backgroundColor: "#F44336",
-    justifyContent: "center",
-    alignItems: "center",
-    width: 70,
-    marginVertical: 8,
-    borderRadius: 12,
+    height: Platform.OS === 'ios' ? 104 : 96,
+    width: Platform.OS === 'ios' ? 80 : 76,
+    backgroundColor: '#fff0f0',
+    marginBottom: Platform.OS === 'ios' ? 12 : 10,
+    borderRadius: Platform.OS === 'ios' ? 16 : 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: Platform.OS === 'ios' ? 12 : 10,
   },
-  checkoutContainer: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 2,
-    marginBottom: 96,
+  deleteActionContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#ff4d4d',
+    borderRadius: Platform.OS === 'ios' ? 16 : 14,
   },
-  checkoutRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  checkoutLabel: {
-    fontSize: 14,
-    color: "#888",
-  },
-  checkoutValue: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  checkoutTotalLabel: {
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  checkoutTotalValue: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#C0EBA6",
-  },
-  checkoutButton: {
-    backgroundColor: "#C0EBA6",
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: "center",
-    marginTop: 16,
-  },
-  checkoutButtonText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#fff",
-  },
-  checkoutContainer: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    elevation: 2,
-    marginVertical: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 2,
-    position: "fixed",
-  },
-  checkoutSummary: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  checkoutText: {
-    fontSize: 14,
-    color: "#888",
-  },
-  checkoutTotalText: {
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  checkoutButton: {
-    backgroundColor: "#4CAF50",
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: "center",
-    marginTop: 16,
-  },
-  checkoutButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
+  deleteActionText: {
+    color: '#fff',
+    fontSize: Platform.OS === 'ios' ? 12 : 11,
+    fontWeight: '600',
+    marginTop: Platform.OS === 'ios' ? 4 : 3,
   },
   emptyCartText: {
-    fontSize: 16,
-    color: "#888",
-    textAlign: "center",
-    marginTop: 20,
+    fontSize: Platform.OS === 'ios' ? 16 : 15,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: Platform.OS === 'ios' ? 40 : 36,
+    fontWeight: '500',
   },
+  modal: {
+    margin: 0,
+    justifyContent: 'flex-end',
+  },
+  checkoutContainer: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: Platform.OS === 'ios' ? 24 : 20,
+    borderTopRightRadius: Platform.OS === 'ios' ? 24 : 20,
+    paddingTop: Platform.OS === 'ios' ? 12 : 10,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderBottomWidth: 0,
+  },
+  checkoutHandle: {
+    width: Platform.OS === 'ios' ? 40 : 36,
+    height: Platform.OS === 'ios' ? 4 : 3,
+    backgroundColor: '#E0E0E0',
+    borderRadius: Platform.OS === 'ios' ? 2 : 1.5,
+    alignSelf: 'center',
+    marginBottom: Platform.OS === 'ios' ? 8 : 6,
+  },
+  checkoutContent: {
+    padding: Platform.OS === 'ios' ? 20 : 16,
+  },
+  checkoutSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: Platform.OS === 'ios' ? 12 : 10,
+  },
+  checkoutText: {
+    fontSize: Platform.OS === 'ios' ? 14 : 13,
+    color: '#666',
+    fontWeight: '500',
+  },
+  checkoutTotalText: {
+    fontSize: Platform.OS === 'ios' ? 16 : 15,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  totalRow: {
+    marginTop: Platform.OS === 'ios' ? 4 : 3,
+    paddingTop: Platform.OS === 'ios' ? 12 : 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+  },
+  checkoutButton: {
+    backgroundColor: '#C0EBA6',
+    borderRadius: Platform.OS === 'ios' ? 12 : 10,
+    padding: Platform.OS === 'ios' ? 16 : 14,
+    alignItems: 'center',
+    marginTop: Platform.OS === 'ios' ? 20 : 16,
+  },
+  checkoutButtonText: {
+    color: '#fff',
+    fontSize: Platform.OS === 'ios' ? 16 : 15,
+    fontWeight: '600',
+  }
 });
 
 export default CartScreen;

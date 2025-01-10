@@ -17,79 +17,83 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthStatus = async () => {
     try {
+      setIsLoading(true);
       const token = await AsyncStorage.getItem('authToken');
       const role = await AsyncStorage.getItem('userRole');
 
-      console.log('Checking auth status - Token:', token, 'Role:', role);
+      if (!token || !role) {
+        await logout();
+        return;
+      }
 
-      if (token && role) {
+      try {
         await getUserProfile(token);
         setIsLoggedIn(true);
         setUserRole(role);
+      } catch (error) {
+        console.error('Error getting profile:', error);
+        await logout();
       }
     } catch (error) {
-      console.error('Error checking auth status:', error);
-      setIsLoggedIn(false);
-      setUserRole(null);
-      setUserData(null);
+      console.error('Auth status check failed:', error);
+      await logout();
     } finally {
       setIsLoading(false);
     }
   };
 
   const getUserProfile = async (token) => {
-    try {
-      const response = await axios.get('http://172.20.10.2:5000/api/profile', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      console.log('User profile data:', response.data);
+    const response = await axios.get('http://172.20.10.3:5000/api/profile', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
 
-      const profile = response.data?.user;
-      if (profile && profile.userId) {
-        setUserData({
-          user_id: profile.userId,
-          email: profile.email,
-          name: profile.name,
-          profilePicture: profile.profilePicture,
-        });
-      } else {
-        throw new Error('Invalid profile data');
-      }
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
+    if (!response.data?.user) {
+      throw new Error('No user data received');
     }
+
+    const profile = response.data.user;
+    setUserData({
+      user_id: profile.userId,
+      email: profile.email,
+      phone: profile.phone || '',
+      username: profile.username || '',
+      name: profile.name || '',
+      profilePicture: profile.profilePicture || null,
+      recipientName: profile.recipientName || '',
+      notes: profile.notes || '',
+      address: profile.address || '',
+    });
   };
 
   const login = async (email, password) => {
     try {
       setIsLoading(true);
-      console.log('Attempting login for email:', email);
-
-      const response = await axios.post('http://172.20.10.2:5000/api/login', {
+      const response = await axios.post('http://172.20.10.3:5000/api/login', {
         email,
         password,
       });
 
-      console.log('Login response:', response.data);
-
       const { accessToken: token, role, user } = response.data;
 
       if (!token || !role || !user || !user.user_id) {
-        throw new Error('Token, role, atau user data tidak ditemukan dalam respons');
+        throw new Error('Invalid response data');
       }
 
+      // Simpan token dan role dulu
       await AsyncStorage.multiSet([
         ['authToken', token],
         ['userRole', role.toLowerCase().trim()],
       ]);
 
+      // Set user data
       setUserData(user);
-      setIsLoggedIn(true);
       setUserRole(role.toLowerCase().trim());
-
-      console.log('Login successful - User data:', user);
-      console.log('isLoggedIn set to:', true);
-      console.log('userRole set to:', role.toLowerCase().trim());
+      
+      // Ambil profil lengkap
+      await getUserProfile(token);
+      
+      // Set login status terakhir
+      setIsLoggedIn(true);
 
       return { success: true, role: role.toLowerCase().trim() };
     } catch (error) {
@@ -107,13 +111,15 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       setIsLoading(true);
+      
+      // Hapus data auth dari storage
       await AsyncStorage.multiRemove(['authToken', 'userRole']);
 
+      // Reset semua state
       setIsLoggedIn(false);
       setUserRole(null);
       setUserData(null);
 
-      console.log('Logout successful');
       return true;
     } catch (error) {
       console.error('Logout error:', error);
@@ -129,20 +135,11 @@ export const AuthProvider = ({ children }) => {
     isLoading,
     userRole,
     userData,
+    setUserData,
     login,
     logout,
     checkAuthStatus,
-    updateUserDataIfEmpty: async () => {
-      if (!userData || !userData.user_id) {
-        const token = await AsyncStorage.getItem('authToken');
-        if (token) {
-          await getUserProfile(token);
-        }
-      }
-    },
   };
-
-  console.log('AuthContext current state:', value);
 
   return (
     <AuthContext.Provider value={value}>
@@ -160,3 +157,4 @@ export const useAuth = () => {
 };
 
 export default AuthContext;
+

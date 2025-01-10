@@ -1,5 +1,4 @@
-// src/screens/ProfilePageScreen.js
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,200 +9,362 @@ import {
   RefreshControl,
   ScrollView,
   Alert,
+  ActivityIndicator,
+  FlatList,
+  Dimensions,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
-import * as ImagePicker from 'expo-image-picker';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 
 // Fungsi untuk menghasilkan warna random berdasarkan seed
 const generateRandomColor = (seed) => {
-  // Menggunakan seed untuk menghasilkan angka random yang konsisten
   const randomNum = Math.abs(Math.sin(seed) * 16777215);
-  // Konversi ke format hex color
   const color = '#' + Math.floor(randomNum).toString(16).padStart(6, '0');
   return color;
 };
 
-// Fungsi untuk menghasilkan gradien warna berdasarkan userId
-const getGradientColors = (userId) => {
-  if (!userId) {
-    // Warna default untuk guest
+// Fungsi untuk menghasilkan gradien warna berdasarkan nama pengguna atau email
+const getGradientColors = (userIdentifier) => {
+  if (!userIdentifier) {
     return ['#C0EBA6', '#86D377'];
   }
-
-  // Menggunakan userId sebagai seed untuk menghasilkan dua warna yang berbeda
-  const seed1 = userId.split('').reduce((acc, char, i) => acc + char.charCodeAt(0) * i, 0);
-  const seed2 = seed1 + 12345; // Offset untuk warna kedua
-
+  const seed1 = userIdentifier.split('').reduce((acc, char, i) => acc + char.charCodeAt(0) * i, 0);
+  const seed2 = seed1 + 12345;
   return [generateRandomColor(seed1), generateRandomColor(seed2)];
 };
 
 const ProfilePageScreen = ({ navigation }) => {
-  const { userData, logout, updateProfilePicture, getUserProfile } = useAuth();
+  const { userData, checkAuthStatus, setUserData } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
-  
-  // Get gradient colors based on user ID
-  const bannerGradient = getGradientColors(userData?.id);
+  const [bannerGradient, setBannerGradient] = useState(['#C0EBA6', '#86D377']);
+  const [savedProducts, setSavedProducts] = useState([]);
+  const [isLoadingSaved, setIsLoadingSaved] = useState(false);
+  const [showSaved, setShowSaved] = useState(true);
 
-  const handleLogout = async () => {
-    try {
-      const success = await logout();
-      if (success) {
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'LoginScreen' }],
-        });
-      }
-    } catch (error) {
-      console.error('Logout error:', error);
-      Alert.alert('Error', 'Failed to logout. Please try again.');
+  useEffect(() => {
+    if (userData) {
+      setBannerGradient(getGradientColors(userData.name || userData.email));
+      fetchSavedProducts();
     }
-  };
+  }, [userData]);
 
-  const selectImage = async () => {
+  const fetchSavedProducts = async () => {
+    if (!userData?.user_id) return;
+    
+    setIsLoadingSaved(true);
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permission Denied',
-          'Sorry, we need camera roll permissions to update your profile picture.'
-        );
+      // 1. Fetch favorite product IDs
+      const favResponse = await axios.get(`http://172.20.10.3:5000/api/favorites/${userData.user_id}`);
+      
+      // Jika tidak ada data favorit, set array kosong
+      if (!favResponse.data || favResponse.status === 404) {
+        setSavedProducts([]);
+        setIsLoadingSaved(false);
         return;
       }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 1,
+      // 2. Fetch detailed product information for each favorite
+      const productPromises = favResponse.data.map(async (fav) => {
+        try {
+          const productResponse = await axios.get(`http://172.20.10.3:5000/api/getproduct/${fav.product_id}`);
+          // Mengakses data produk yang berada di dalam properti 'product'
+          const productData = productResponse.data.product;
+          
+          if (!productData) {
+            console.log('Invalid product data:', productResponse.data);
+            return null;
+          }
+
+          return {
+            id: productData.product_id,
+            product_id: productData.product_id,
+            name: productData.name || 'Unnamed Product',
+            description: productData.description || 'No description available',
+            price: productData.price ? parseFloat(productData.price) : 0,
+            image: productData.productPict || null,
+            category: productData.category_id || 'Unknown',
+            stock: productData.stock || 0,
+          };
+        } catch (error) {
+          console.log(`Skipping product ${fav.product_id}:`, error.message);
+          return null;
+        }
       });
 
-      if (!result.canceled && result.assets[0]) {
-        const success = await updateProfilePicture(result.assets[0].uri);
-        if (success) {
-          Alert.alert('Success', 'Profile picture updated successfully');
-        }
-      }
+      const products = await Promise.all(productPromises);
+      // Filter out any failed product fetches
+      const validProducts = products.filter(product => product !== null);
+      setSavedProducts(validProducts);
     } catch (error) {
-      console.error('Image selection error:', error);
-      Alert.alert('Error', 'Failed to update profile picture');
+      // Jika error 404, berarti tidak ada favorit
+      if (error.response?.status === 404) {
+        setSavedProducts([]);
+      } else {
+        console.log('Error fetching saved products:', error.message);
+      }
+    } finally {
+      setIsLoadingSaved(false);
     }
   };
 
   const onRefresh = useCallback(async () => {
+    setRefreshing(true);
     try {
-      setRefreshing(true);
-      await getUserProfile();
+      await Promise.all([refreshProfile(), fetchSavedProducts()]);
     } finally {
       setRefreshing(false);
     }
-  }, [getUserProfile]);
+  }, [setUserData]);
+
+  const handleRemoveFavorite = async (productId) => {
+    if (!userData?.user_id) return;
+
+    try {
+      const response = await axios.delete(`http://172.20.10.3:5000/api/favorites/removeFavorite`, {
+        data: {
+          user_id: userData.user_id,
+          product_id: productId
+        }
+      });
+
+      if (response.data) {
+        // Hapus produk dari state lokal
+        setSavedProducts(prev => prev.filter(product => product.product_id !== productId));
+        Alert.alert('Sukses', 'Produk berhasil dihapus dari favorit');
+      }
+    } catch (error) {
+      console.error('Error removing favorite:', error);
+      Alert.alert('Error', 'Gagal menghapus produk dari favorit');
+    }
+  };
+
+  const renderProductItem = ({ item }) => {
+    const formattedPrice = item.price.toLocaleString('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+
+    return (
+      <TouchableOpacity
+        style={styles.productCard}
+        onPress={() => navigation.navigate('ProductDetailScreen', { product: item })}
+      >
+        <Image 
+          source={item.image ? { uri: item.image } : require('../../assets/images/no-image.png')} 
+          style={styles.productImage}
+        />
+        <Text style={styles.productName}>{item.name}</Text>
+        <View style={styles.productFooter}>
+          <Text style={styles.productPrice}>{formattedPrice}</Text>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={(e) => {
+              e.stopPropagation(); // Prevent navigation
+              handleAddToCart(item);
+            }}
+          >
+            <Ionicons name="add" size={20} color="#ffffff" fontWeight="bold" />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const handleAddToCart = async (product) => {
+    if (!userData?.user_id) {
+      Alert.alert('Error', 'Silakan login terlebih dahulu');
+      return;
+    }
+
+    try {
+      const payload = {
+        user_id: userData.user_id,
+        product_id: product.id,
+        productPict: product.image,
+        quantity: 1,
+        price: product.price,
+      };
+
+      const response = await fetch('http://172.20.10.3:5000/api/addcart', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        Alert.alert('Sukses', 'Produk berhasil ditambahkan ke keranjang');
+      } else {
+        Alert.alert('Error', data.message || 'Gagal menambahkan produk ke keranjang');
+      }
+    } catch (error) {
+      console.error('Error adding product to cart:', error);
+      Alert.alert('Error', 'Terjadi kesalahan. Silakan coba lagi.');
+    }
+  };
+
+  const refreshProfile = async () => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) return;
+
+      const response = await axios.get('http://172.20.10.3:5000/api/profile', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data?.user) {
+        const profile = response.data.user;
+        setUserData({
+          user_id: profile.userId,
+          email: profile.email,
+          phone: profile.phone || '',
+          username: profile.username || '',
+          name: profile.name || '',
+          profilePicture: profile.profilePicture || null,
+          recipientName: profile.recipientName || '',
+          notes: profile.notes || '',
+          address: profile.address || '',
+        });
+      }
+    } catch (error) {
+      console.error('Error refreshing profile:', error);
+      Alert.alert('Error', 'Gagal memperbarui profil');
+    }
+  };
+
+  if (!userData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={[styles.container, styles.centerContent]}>
+          <Text>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Profile</Text>
-        <TouchableOpacity style={styles.settingsButton}>
-          <Ionicons name="settings-outline" size={24} color="#666666" />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[bannerGradient[0]]}
-            tintColor={bannerGradient[0]}
-          />
-        }
-      >
-        <View style={styles.profileSection}>
-          <View style={styles.bannerBackground}>
-            <LinearGradient
-              colors={bannerGradient}
-              style={styles.bannerPattern}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              locations={[0, 1]}
-            />
-          </View>
-          
-          <TouchableOpacity style={styles.avatarContainer} onPress={selectImage}>
-            <Image
-              source={userData?.profilePicture ? { uri: userData.profilePicture } : null}
-              style={styles.avatarImage}
-            />
-            {!userData?.profilePicture && (
-              <View style={[styles.avatarImage, styles.defaultAvatar]}>
-                <FontAwesome5 name="user-alt" size={40} color="#666666" />
-              </View>
-            )}
-            <View style={styles.plusIconContainer}>
-              <FontAwesome5 name="plus-circle" size={25} color={bannerGradient[0]} solid />
-            </View>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Profile</Text>
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={() => navigation.navigate('SettingsPage')}
+          >
+            <Ionicons name="settings-outline" size={24} color="#666666" />
           </TouchableOpacity>
-
-          <Text style={styles.username}>{userData?.name || 'Guest User'}</Text>
-
-          <View style={styles.actionButtons}>
-            <TouchableOpacity 
-              style={[styles.savedButton, { backgroundColor: bannerGradient[0] }]}
-            >
-              <Text style={styles.buttonText}>Saved</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.editButton}>
-              <Text style={styles.editButtonText}>Edit Profile</Text>
-            </TouchableOpacity>
-          </View>
         </View>
 
-        <View style={styles.productsGrid}>
-          <View style={styles.productCard}>
-            <Image 
-              source={require('../../assets/images/rc-kitten.png')}
-              style={styles.productImage}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[bannerGradient[0]]}
+              tintColor={bannerGradient[0]}
             />
-            <Text style={styles.productName}>RC Kitten</Text>
-            <View style={styles.productPriceRow}>
-              <Text style={styles.productPrice}>$20,99</Text>
-              <TouchableOpacity 
-                style={[styles.addButton, { backgroundColor: bannerGradient[0] }]}
+          }
+        >
+          <View style={styles.profileSection}>
+            <View style={styles.bannerBackground}>
+              <LinearGradient
+                colors={bannerGradient}
+                style={styles.bannerPattern}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                locations={[0, 1]}
+              />
+            </View>
+
+            <View style={styles.avatarContainer}>
+              <Image
+                source={userData?.profilePicture ? { uri: userData.profilePicture } : null}
+                style={styles.avatarImage}
+              />
+              {!userData?.profilePicture && (
+                <View style={[styles.avatarImage, styles.defaultAvatar]}>
+                  <FontAwesome5 name="user-alt" size={40} color="#666666" />
+                </View>
+              )}
+            </View>
+
+            <Text style={styles.username}>{userData?.name || 'Guest User'}</Text>
+            <Text style={styles.userHandle}>@{userData?.username || 'username'}</Text>
+
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={[styles.savedButton, { backgroundColor: bannerGradient[0] }]}
+                onPress={() => setShowSaved(!showSaved)}
               >
-                <Text style={styles.addButtonText}>+</Text>
+                <Text style={styles.buttonText}>Saved ({savedProducts.length})</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.editButton}
+                onPress={() => navigation.navigate('EditAccountPage')}
+              >
+                <Text style={styles.editButtonText}>Edit Profile</Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </ScrollView>
 
-      <TouchableOpacity 
-        style={[styles.logoutButton, { backgroundColor: '#FF6B6B' }]} 
-        onPress={handleLogout}
-      >
-        <Text style={styles.logoutText}>Logout</Text>
-      </TouchableOpacity>
+          {showSaved && (
+            <View style={styles.savedProductsSection}>
+              {isLoadingSaved ? (
+                <ActivityIndicator size="large" color={bannerGradient[0]} />
+              ) : savedProducts.length > 0 ? (
+                <FlatList
+                  data={savedProducts}
+                  renderItem={renderProductItem}
+                  keyExtractor={(item) => item.product_id?.toString() || Math.random().toString()}
+                  numColumns={2}
+                  scrollEnabled={false}
+                  contentContainerStyle={styles.productGrid}
+                />
+              ) : (
+                <Text style={styles.noProductsText}>Belum ada produk tersimpan</Text>
+              )}
+            </View>
+          )}
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
   container: {
     flex: 1,
     backgroundColor: '#ffffff',
+    paddingHorizontal: Platform.OS === 'android' ? 10 : 12,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 20,
+    paddingHorizontal: Platform.OS === 'android' ? 10 : 12,
+    marginTop: Platform.OS === 'android' ? 0 : 10,
+    marginBottom: Platform.OS === 'android' ? 10 : 20,
+    paddingVertical: Platform.OS === 'android' ? 12 : 0,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: Platform.OS === 'android' ? 16 : 18,
     fontWeight: '600',
     color: '#000000',
   },
@@ -218,7 +379,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bannerBackground: {
-    width: '90%',
+    width: '100%',
     height: 150,
     overflow: 'hidden',
     borderRadius: 15,
@@ -249,9 +410,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000000',
   },
+  userHandle: {
+    fontSize: 16,
+    color: '#666666',
+    marginTop: 4,
+    marginBottom: 8,
+  },
   actionButtons: {
     flexDirection: 'row',
-    marginTop: 20,
+    marginTop: 12,
     gap: 10,
   },
   savedButton: {
@@ -275,77 +442,92 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
-  productsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 15,
-    gap: 15,
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  retryButton: {
     marginTop: 20,
+    padding: 10,
+    backgroundColor: '#C0EBA6',
+    borderRadius: 8,
+  },
+  retryText: {
+    color: '#000000',
+    fontWeight: '500',
+  },
+  backButton: {
+    position: 'absolute',
+    left: 20,
+  },
+  savedProductsSection: {
+    marginTop: 10,
+    marginBottom: 40,
+    paddingHorizontal: 0,
+  },
+  productGrid: {
+    gap: 10,
   },
   productCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 15,
+    width: '48%',
+    height: 220,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 10,
     padding: 15,
-    width: '47%',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
     shadowOpacity: 0.1,
-    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 3,
+    display: 'flex',
+    flexDirection: 'column',
+    margin: 5,
   },
   productImage: {
-    width: '100%',
-    height: 150,
-    borderRadius: 10,
-    marginBottom: 10,
+    width: 100,
+    height: 100,
+    resizeMode: 'contain',
+    marginBottom: 8,
+    alignSelf: 'center',
   },
   productName: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 5,
+    fontSize: 14,
+    width: '100%',
+    minHeight: 40,
+    maxHeight: 40,
+    overflow: 'hidden',
   },
-  productPriceRow: {
+  productFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    width: '100%',
+    marginTop: 8,
   },
   productPrice: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
+    color: '#333',
   },
   addButton: {
+    backgroundColor: '#C0EBA6',
     width: 30,
     height: 30,
     borderRadius: 15,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  addButtonText: {
-    color: '#000000',
-    fontSize: 20,
-    fontWeight: 'bold',
+  noProductsText: {
+    textAlign: 'center',
+    color: '#666666',
+    marginTop: 20,
   },
-  logoutButton: {
-    margin: 20,
-    padding: 15,
-    borderRadius: 25,
-    alignItems: 'center',
-  },
-  logoutText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  plusIconContainer: {
+  removeButton: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 15,
-    padding: 2,
+    right: 5,
+    top: 5,
+    zIndex: 1,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
   },
 });
 
